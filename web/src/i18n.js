@@ -108,7 +108,7 @@ const resources = {
         sun: "Domingo",
       },
       footer: {
-        tip_me: "Tip me",
+        tip_me: "Invítame un café",
       },
       pwa: {
         update_available: "Nueva version disponible. Recargar?",
@@ -220,7 +220,7 @@ const resources = {
         sun: "Sunday",
       },
       footer: {
-        tip_me: "Tip me",
+        tip_me: "Buy me a coffee",
       },
       pwa: {
         update_available: "New version available. Reload?",
