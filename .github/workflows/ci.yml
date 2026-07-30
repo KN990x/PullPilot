@@ -63,7 +63,7 @@ jobs:
       # No `version:`: pnpm/action-setup reads `packageManager` from web/package.json,
       # so CI, Docker and local development all use exactly the same pnpm.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
 
