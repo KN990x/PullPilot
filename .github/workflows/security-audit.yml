@@ -1,9 +1,9 @@
-# Auditoría de dependencias.
+# Dependency auditing.
 #
-# Nota de diseño: este workflow NO se ejecuta en cada pull request. Antes lo hacía, y
-# como fallaba de forma permanente en main desde 2026-04-28, TODOS los PRs de Dependabot
-# nacían con una ✗ y nadie los mergeaba. El gate de merge es ci.yml; esto es la alarma.
-# En PRs sólo corre cuando el propio PR toca los manifiestos de dependencias.
+# Design note: this workflow does NOT run on every pull request. It used to, and since
+# it had been failing permanently on main from 2026-04-28 onwards, EVERY Dependabot PR
+# was born with a ✗ and none of them were merged. The merge gate is ci.yml; this is the
+# alarm. On PRs it only runs when the PR itself touches the dependency manifests.
 name: Security audit
 
 on:
@@ -18,7 +18,7 @@ on:
       - "web/pnpm-workspace.yaml"
       - "Dockerfile"
   schedule:
-    # Lunes 05:30 UTC, antes de que Dependabot abra los PRs de la semana.
+    # Mondays 05:30 UTC, before Dependabot opens the week's PRs.
     - cron: "30 5 * * 1"
   workflow_dispatch:
 
@@ -59,8 +59,8 @@ jobs:
             echo "### pip-audit"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          # `|| status=$?` es necesario: el shell por defecto corre con `-e` y un
-          # pip-audit fallido abortaría el script antes de cerrar el bloque markdown.
+          # `|| status=$?` is required: the default shell runs with `-e`, so a failing
+          # pip-audit would abort the script before the markdown block is closed.
           set -o pipefail
           status=0
           pip-audit -r /tmp/audit-req.txt 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
@@ -68,7 +68,7 @@ jobs:
           exit "$status"
 
   npm-audit:
-    name: Frontend (npm audit)
+    name: Frontend (pnpm audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -90,12 +90,12 @@ jobs:
         working-directory: web
         run: pnpm install --frozen-lockfile
 
-      # Bloqueante: sólo lo que acaba en el bundle servido a los usuarios.
+      # Blocking: only what ends up in the bundle served to users.
       - name: Audit production dependencies
         working-directory: web
         run: |
           {
-            echo "### pnpm audit — dependencias de producción (bloqueante)"
+            echo "### pnpm audit — production dependencies (blocking)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           set -o pipefail
@@ -104,16 +104,16 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-      # Informativo: el tooling de build (eslint, vite, workbox…) no se despliega.
-      # Además los avisos con rangos demasiado amplios producen falsos positivos aquí:
-      # p. ej. GHSA-mh99-v99m-4gvg declara `<= 5.0.7` para brace-expansion, lo que barre
-      # también las ramas de mantenimiento 1.x y 2.x, que sí están parcheadas.
-      - name: Audit full tree (informativo)
+      # Informational: build tooling (eslint, vite, workbox…) is never deployed.
+      # Advisories with over-broad ranges also produce false positives here: for
+      # example GHSA-mh99-v99m-4gvg declares `<= 5.0.7` for brace-expansion, which
+      # sweeps in the 1.x and 2.x maintenance lines that are in fact patched.
+      - name: Audit full tree (informational)
         working-directory: web
         continue-on-error: true
         run: |
           {
-            echo "### pnpm audit — árbol completo, incl. devDependencies (informativo)"
+            echo "### pnpm audit — full tree, incl. devDependencies (informational)"
             echo '```'
             pnpm audit 2>&1 || true
             echo '```'

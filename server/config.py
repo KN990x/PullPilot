@@ -34,7 +34,7 @@ LOG_LOCALE: Literal["es", "en"] = (
 
 AUTH_USER = os.getenv("AUTH_USER")
 AUTH_PASS = os.getenv("AUTH_PASS")
-# Si es false (por defecto), hace falta AUTH_USER y AUTH_PASS o el arranque falla.
+# When false (the default), AUTH_USER and AUTH_PASS are required or startup fails.
 ALLOW_NO_AUTH = _env_bool("ALLOW_NO_AUTH", False)
 _SESSION_SECRET_SET = os.getenv("SESSION_SECRET") is not None
 SESSION_SECRET = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
@@ -44,7 +44,7 @@ SESSION_SAME_SITE: Literal["lax", "strict", "none"] = (
     _raw_same_site if _raw_same_site in ("lax", "strict", "none") else "lax"
 )
 
-# Coma-separado; vacío = permitir cualquier origen (misma SPA servida por FastAPI suele no necesitar CORS).
+# Comma-separated; empty = allow any origin (the SPA served by FastAPI itself usually needs no CORS).
 _raw_cors = os.getenv("CORS_ORIGINS", "").strip()
 CORS_ORIGINS: list[str] = (
     ["*"]
@@ -56,7 +56,7 @@ LOGIN_RATE_LIMIT_ENABLED = _env_bool("LOGIN_RATE_LIMIT_ENABLED", True)
 LOGIN_RATE_LIMIT_MAX = int(os.getenv("LOGIN_RATE_LIMIT_MAX", "15"))
 LOGIN_RATE_LIMIT_WINDOW_SEC = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SEC", "300"))
 
-# Tras reverse proxy de confianza: usar la primera IP de X-Forwarded-For para rate limit de login.
+# Behind a trusted reverse proxy: use the first X-Forwarded-For IP for login rate limiting.
 TRUST_X_FORWARDED_FOR = _env_bool("TRUST_X_FORWARDED_FOR", False)
 
 os.environ.setdefault("TZ", "UTC")

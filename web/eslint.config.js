@@ -7,8 +7,8 @@ import reactRefresh from "eslint-plugin-react-refresh";
 export default [
   { ignores: ["dist"] },
   js.configs.recommended,
-  // Desde eslint-plugin-react-hooks v6 los presets son flat config (arrays), no
-  // objetos con `.rules`: hay que esparcir el preset, no sus reglas.
+  // From eslint-plugin-react-hooks v6 onwards the presets are flat configs (arrays),
+  // not objects with `.rules`: spread the preset, not its rules.
   ...reactHooks.configs["recommended-latest"],
   {
     files: ["**/*.{js,jsx}"],

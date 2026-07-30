@@ -61,9 +61,9 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="PullPilot API", lifespan=lifespan)
 
-# Orden de middleware (Starlette): lo último en add_middleware recibe la petición primero.
-# CORSMiddleware (externo) → SessionMiddleware → rutas y este auth_middleware (http),
-# de modo que request.session esté disponible aquí.
+# Middleware order (Starlette): the last one added via add_middleware receives the
+# request first. CORSMiddleware (outermost) → SessionMiddleware → routes and this
+# auth_middleware (http), so that request.session is available here.
 
 
 @app.middleware("http")

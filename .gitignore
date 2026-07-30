@@ -1,11 +1,11 @@
-# Secretos y configuración local — NUNCA deben subirse (contienen AUTH_PASS / SESSION_SECRET)
+# Secrets and local config — MUST NEVER be committed (they hold AUTH_PASS / SESSION_SECRET)
 .env
 .env.*
 !.env.example
 *.env
 
 # Python
-# .python-version SÍ se versiona: fija la versión de pyenv del proyecto.
+# .python-version IS tracked on purpose: it pins the project's pyenv version.
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -25,11 +25,11 @@ web/coverage/
 .npm/
 .pnpm-store/
 .pnpm-debug.log*
-# npm quedó atrás: el lockfile del proyecto es web/pnpm-lock.yaml.
+# npm is no longer used: the project lockfile is web/pnpm-lock.yaml.
 package-lock.json
 yarn.lock
 
-# Datos de ejecución
+# Runtime data
 data/
 server/data/
 *.db
@@ -37,11 +37,11 @@ server/data/
 *.sqlite3
 pullpilot.db
 
-# Instrucciones locales para agentes: no forman parte del proyecto
+# Local agent instructions: not part of the project
 AGENTS.md
 CLAUDE.md
 
-# Editores y SO
+# Editors and OS
 .DS_Store
 .vscode/
 .idea/

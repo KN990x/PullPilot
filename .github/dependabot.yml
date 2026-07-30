@@ -1,14 +1,14 @@
-# Estrategia: agrupar en vez de acumular.
+# Strategy: group instead of piling up.
 #
-# El problema que resuelve este fichero: `open-pull-requests-limit` SÓLO aplica a las
-# actualizaciones de versión. Las de seguridad son ilimitadas y, si no existe un grupo
-# con `applies-to: security-updates`, Dependabot abre **un PR por dependencia**. Eso es
-# lo que llevó a tener 19 PRs abiertos a la vez.
+# The problem this file solves: `open-pull-requests-limit` applies ONLY to version
+# updates. Security updates are unlimited and, unless a group with
+# `applies-to: security-updates` exists, Dependabot opens **one PR per dependency**.
+# That is what led to 19 open PRs at once.
 #
-# Por cada ecosistema se definen como mucho tres grupos:
-#   *-security     -> todas las alertas de seguridad en UN solo PR (lo urgente)
-#   *-patch-minor  -> parches y minors en UN solo PR (mergeable casi a ciegas si CI pasa)
-#   *-major        -> majors en UN solo PR (revisión manual, pero sin goteo)
+# Each ecosystem gets at most three groups:
+#   *-security     -> every security alert in ONE PR (the urgent one)
+#   *-patch-minor  -> patches and minors in ONE PR (near-blind merge once CI is green)
+#   *-major        -> majors in ONE PR (manual review, but no drip)
 version: 2
 
 updates:
@@ -36,7 +36,7 @@ updates:
           - "*"
 
   # ---------------------------------------------------------------------------
-  # Python (pyproject.toml). No hay lockfile: CI audita el árbol resuelto.
+  # Python (pyproject.toml). No lockfile: CI audits the resolved tree instead.
   # ---------------------------------------------------------------------------
   - package-ecosystem: "pip"
     directory: "/"
@@ -46,8 +46,8 @@ updates:
       time: "06:00"
       timezone: "Europe/Madrid"
     open-pull-requests-limit: 5
-    # Evita el goteo de parches recién publicados y da margen a que se retiren
-    # releases defectuosas. No aplica a las actualizaciones de seguridad.
+    # Avoids a drip of freshly published patches and leaves room for bad releases to
+    # be yanked. Does not apply to security updates.
     cooldown:
       default-days: 7
     commit-message:
@@ -75,14 +75,14 @@ updates:
           - "*"
 
   # ---------------------------------------------------------------------------
-  # Frontend (web/). Usa pnpm: el ecosistema sigue llamándose "npm" porque es el
-  # que cubre npm, Yarn, pnpm y Bun; Dependabot lee web/pnpm-lock.yaml.
+  # Frontend (web/). It uses pnpm: the ecosystem is still called "npm" because that
+  # one covers npm, Yarn, pnpm and Bun; Dependabot reads web/pnpm-lock.yaml.
   #
-  # OJO: Dependabot soporta pnpm v7-v10. Por eso `packageManager` en
-  # web/package.json está fijado a pnpm@10.34.5 y no a la 11: la 11 generaría un
-  # lockfile que Dependabot podría no saber actualizar, y todo este fichero
-  # dejaría de servir para nada. El formato del lockfile es el mismo (9.0) en
-  # ambas, así que no se pierde nada por esperar a que soporten la 11.
+  # NOTE: Dependabot supports pnpm v7-v10. That is why `packageManager` in
+  # web/package.json is pinned to pnpm@10.34.5 rather than 11: v11 would produce a
+  # lockfile Dependabot might not know how to update, and this whole file would stop
+  # being of any use. The lockfile format (9.0) is the same in both, so nothing is
+  # lost by waiting for v11 support.
   # ---------------------------------------------------------------------------
   - package-ecosystem: "npm"
     directory: "/web"
@@ -94,20 +94,20 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
-    # Las dependencias usan rangos `^`: sólo tocar package.json cuando el rango
-    # ya no admita la versión nueva. Con la estrategia por defecto (`increase`)
-    # Dependabot reescribe el manifiesto en cada parche y genera PRs redundantes.
+    # Dependencies use `^` ranges: only touch package.json when the range no longer
+    # admits the new version. With the default strategy (`increase`) Dependabot
+    # rewrites the manifest on every patch and produces redundant PRs.
     versioning-strategy: increase-if-necessary
     commit-message:
       prefix: "chore(deps)"
     labels:
       - "dependencies"
       - "javascript"
-    # Congelados a propósito: subirlos es una migración, no una actualización.
-    #   react 19       -> cambios de API y de renderizado
-    #   tailwindcss 4  -> configuración CSS-first (@tailwindcss/postcss, index.css)
-    # Los avisos de seguridad IGNORAN esta lista, así que si aparece un CVE en
-    # cualquiera de ellos Dependabot abrirá el PR de todas formas.
+    # Frozen on purpose: upgrading these is a migration, not an update.
+    #   react 19       -> API and rendering changes
+    #   tailwindcss 4  -> CSS-first config (@tailwindcss/postcss, index.css)
+    # Security advisories IGNORE this list, so if a CVE lands on any of them
+    # Dependabot will open the PR anyway.
     ignore:
       - dependency-name: "react"
         update-types: ["version-update:semver-major"]
@@ -139,8 +139,8 @@ updates:
           - "*"
 
   # ---------------------------------------------------------------------------
-  # Imágenes base del Dockerfile (node:24-alpine, python:3.11-slim).
-  # No estaban cubiertas: los CVE de la imagen base pasaban desapercibidos.
+  # Dockerfile base images (node:24-alpine, python:3.11-slim).
+  # These were not covered before: base-image CVEs went unnoticed.
   # ---------------------------------------------------------------------------
   - package-ecosystem: "docker"
     directory: "/"

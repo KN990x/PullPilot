@@ -142,8 +142,8 @@ def test_update_passes_locale_to_logic(
         seen["locale"] = locale
         return True, []
 
-    # El router hace `from server.services.projects import ...`, así que el nombre
-    # queda fijado en su propio módulo: hay que parchear ahí, no en el de origen.
+    # The router does `from server.services.projects import ...`, so the name is bound
+    # in its own module: patch it there, not in the module it came from.
     monkeypatch.setattr(
         projects_router_module, "update_single_project_logic", _fake
     )

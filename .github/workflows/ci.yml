@@ -1,5 +1,6 @@
-# Gate de merge del repositorio: replica `make lint` + `make test` y valida la imagen.
-# Es el check que faltaba; sin él ningún PR de Dependabot tenía señal para mergearse.
+# The repository's merge gate: mirrors `make lint` + `make test` and validates the image.
+# This is the check that was missing; without it no Dependabot PR had any signal to be
+# merged on.
 name: CI
 
 on:
@@ -29,8 +30,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # La matriz cubre 3.11-3.13 a propósito; .python-version fija la 3.11 para
-      # el desarrollo local (paridad con la imagen python:3.11-slim).
+      # The matrix covers 3.11-3.13 on purpose; .python-version pins 3.11 for local
+      # development (parity with the python:3.11-slim image).
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -59,8 +60,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # Sin `version:`: pnpm/action-setup lee `packageManager` de web/package.json,
-      # así que CI, Docker y el entorno local usan exactamente el mismo pnpm.
+      # No `version:`: pnpm/action-setup reads `packageManager` from web/package.json,
+      # so CI, Docker and local development all use exactly the same pnpm.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -94,8 +95,8 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # Una sola plataforma: aquí sólo se comprueba que el multi-stage compila.
-      # El build multi-arch real vive en ghcr-publish.yml.
+      # Single platform: this only checks that the multi-stage build compiles.
+      # The real multi-arch build lives in ghcr-publish.yml.
       - name: Build image
         uses: docker/build-push-action@v7
         with:
@@ -107,7 +108,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Smoke test (arranque + healthcheck)
+      - name: Smoke test (startup + healthcheck)
         run: |
           docker run -d --name pullpilot-ci \
             -e ALLOW_NO_AUTH=true \
@@ -117,12 +118,12 @@ jobs:
           for _ in $(seq 1 30); do
             status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/update-status || true)
             if [ "$status" = "200" ] || [ "$status" = "401" ]; then
-              echo "El contenedor responde (HTTP $status)"
+              echo "Container is responding (HTTP $status)"
               exit 0
             fi
             sleep 2
           done
-          echo "::error::El contenedor no respondió en 60s"
+          echo "::error::Container did not respond within 60s"
           docker logs pullpilot-ci
           exit 1
 

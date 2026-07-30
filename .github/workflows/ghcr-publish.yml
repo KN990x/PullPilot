@@ -4,7 +4,7 @@ on:
   release:
     types: [published]
 
-# Sin permisos por defecto a nivel de workflow: cada job pide sólo lo suyo.
+# No default permissions at workflow level: each job asks only for what it needs.
 permissions: {}
 
 jobs:
@@ -56,8 +56,9 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Procedencia y SBOM firmados junto a la imagen: permiten verificar de qué
-          # commit y con qué dependencias se construyó. No alteran la imagen en sí.
+          # Provenance and SBOM attestations published alongside the image: they let
+          # you verify which commit and which dependencies it was built from. They do
+          # not alter the image itself.
           provenance: mode=max
           sbom: true
 

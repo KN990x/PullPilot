@@ -21,7 +21,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=9.1",
-  # Starlette >=1.3 deprecó `httpx` en `starlette.testclient` a favor de `httpx2`.
+  # Starlette >=1.3 deprecates `httpx` in `starlette.testclient` in favour of `httpx2`.
   "httpx2>=2.9.1",
   "ruff>=0.16.1",
 ]
