@@ -1,0 +1,15 @@
+# Configuración de pnpm para el frontend (no es un monorepo: desde la v10 pnpm
+# lee sus ajustes de este fichero).
+
+# pnpm bloquea por defecto los scripts de instalación de las dependencias, que es
+# el vector clásico de compromiso de la cadena de suministro en npm. Aquí se
+# autorizan uno a uno. esbuild lo necesita para colocar su binario nativo.
+allowBuilds:
+  esbuild: true
+
+# Edad mínima que debe tener una versión para entrar en una resolución nueva:
+# 7 días (10080 minutos). Evita instalar un paquete publicado hace unas horas,
+# que es justo la ventana en la que se detectan las publicaciones maliciosas.
+# Alineado a propósito con `cooldown: default-days: 7` de .github/dependabot.yml.
+# No afecta a `--frozen-lockfile`, así que CI y Docker siguen siendo deterministas.
+minimumReleaseAge: 10080

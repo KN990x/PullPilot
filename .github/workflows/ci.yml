@@ -29,6 +29,8 @@ jobs:
         with:
           persist-credentials: false
 
+      # La matriz cubre 3.11-3.13 a propósito; .python-version fija la 3.11 para
+      # el desarrollo local (paridad con la imagen python:3.11-slim).
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
@@ -57,23 +59,30 @@ jobs:
         with:
           persist-credentials: false
 
+      # Sin `version:`: pnpm/action-setup lee `packageManager` de web/package.json,
+      # así que CI, Docker y el entorno local usan exactamente el mismo pnpm.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install
         working-directory: web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
         working-directory: web
-        run: npm run lint
+        run: pnpm run lint
 
       - name: Build
         working-directory: web
-        run: npm run build
+        run: pnpm run build
 
   docker:
     name: Docker image

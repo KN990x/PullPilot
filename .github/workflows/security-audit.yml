@@ -14,7 +14,8 @@ on:
     paths:
       - "pyproject.toml"
       - "web/package.json"
-      - "web/package-lock.json"
+      - "web/pnpm-lock.yaml"
+      - "web/pnpm-workspace.yaml"
       - "Dockerfile"
   schedule:
     # Lunes 05:30 UTC, antes de que Dependabot abra los PRs de la semana.
@@ -74,27 +75,32 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install
         working-directory: web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       # Bloqueante: sólo lo que acaba en el bundle servido a los usuarios.
       - name: Audit production dependencies
         working-directory: web
         run: |
           {
-            echo "### npm audit — dependencias de producción (bloqueante)"
+            echo "### pnpm audit — dependencias de producción (bloqueante)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           set -o pipefail
           status=0
-          npm audit --omit=dev --audit-level=high 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          pnpm audit --prod --audit-level high 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
@@ -107,8 +113,8 @@ jobs:
         continue-on-error: true
         run: |
           {
-            echo "### npm audit — árbol completo, incl. devDependencies (informativo)"
+            echo "### pnpm audit — árbol completo, incl. devDependencies (informativo)"
             echo '```'
-            npm audit 2>&1 || true
+            pnpm audit 2>&1 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

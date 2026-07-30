@@ -62,5 +62,10 @@ Out of scope:
 ## Automated security tooling
 
 This repository runs CodeQL (default setup), Dependabot alerts and grouped security
-updates, secret scanning with push protection, `pip-audit` for Python, and `npm audit`
+updates, secret scanning with push protection, `pip-audit` for Python, and `pnpm audit`
 for the frontend. See [`.github/workflows/`](.github/workflows/).
+
+The frontend additionally relies on two pnpm guarantees, configured in
+[`web/pnpm-workspace.yaml`](web/pnpm-workspace.yaml): dependency install scripts are
+blocked unless explicitly allowlisted, and a new resolution will not pick a version
+published within the last 7 days.

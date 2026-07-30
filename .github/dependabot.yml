@@ -75,7 +75,14 @@ updates:
           - "*"
 
   # ---------------------------------------------------------------------------
-  # Frontend (web/)
+  # Frontend (web/). Usa pnpm: el ecosistema sigue llamándose "npm" porque es el
+  # que cubre npm, Yarn, pnpm y Bun; Dependabot lee web/pnpm-lock.yaml.
+  #
+  # OJO: Dependabot soporta pnpm v7-v10. Por eso `packageManager` en
+  # web/package.json está fijado a pnpm@10.34.5 y no a la 11: la 11 generaría un
+  # lockfile que Dependabot podría no saber actualizar, y todo este fichero
+  # dejaría de servir para nada. El formato del lockfile es el mismo (9.0) en
+  # ambas, así que no se pierde nada por esperar a que soporten la 11.
   # ---------------------------------------------------------------------------
   - package-ecosystem: "npm"
     directory: "/web"

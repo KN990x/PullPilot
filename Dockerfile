@@ -1,14 +1,23 @@
 FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 
+# corepack instala exactamente el pnpm declarado en `packageManager`, así que la
+# imagen usa la misma versión que el entorno local y que CI.
+# Node 24 aún trae corepack incorporado; si un futuro bump de Dependabot sube la
+# imagen base y este paso falla, es que hay que instalarlo aparte.
+RUN corepack enable
+
 WORKDIR /app-web
 
-COPY web/package*.json ./
+# Solo los manifiestos primero, para que la capa de dependencias se cachee y no
+# se invalide cada vez que cambia el código fuente.
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
 
-RUN npm ci
+RUN pnpm install --frozen-lockfile
 
 COPY web/ ./
-RUN npm run build
+RUN pnpm run build
 
+# La versión debe ir a la par con .python-version (pyenv) en la raíz del repo.
 FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y \

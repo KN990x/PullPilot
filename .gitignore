@@ -5,6 +5,7 @@
 *.env
 
 # Python
+# .python-version SÍ se versiona: fija la versión de pyenv del proyecto.
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -22,6 +23,11 @@ web/dist/
 web/build/
 web/coverage/
 .npm/
+.pnpm-store/
+.pnpm-debug.log*
+# npm quedó atrás: el lockfile del proyecto es web/pnpm-lock.yaml.
+package-lock.json
+yarn.lock
 
 # Datos de ejecución
 data/
@@ -30,6 +36,10 @@ server/data/
 *.sqlite
 *.sqlite3
 pullpilot.db
+
+# Instrucciones locales para agentes: no forman parte del proyecto
+AGENTS.md
+CLAUDE.md
 
 # Editores y SO
 .DS_Store

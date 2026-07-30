@@ -6,21 +6,31 @@ You can open issues for bugs or ideas, and pull requests for fixes or features.
 
 ## Requirements
 
-- **Python** 3.11 or newer (see `requires-python` in `pyproject.toml`).
-- **Node.js** (LTS recommended) and npm for the frontend in `web/`.
+- **[pyenv](https://github.com/pyenv/pyenv)** to get the Python version pinned in
+  `.python-version` (3.11.15 — the same line as the published `python:3.11-slim` image).
+  Any Python 3.11+ works, but pyenv is what CI parity assumes.
+- **Node.js** 22.12 or newer, and **pnpm** for the frontend in `web/`. Do not use npm or
+  Yarn: the lockfile is `web/pnpm-lock.yaml`.
 - **Docker** and **Docker Compose** (optional but useful to validate the production image or real compose workflows).
 
 ## Development setup
+
+The quickest path is `make setup` (backend) and `make setup-web` (frontend). Both are
+described below if you prefer to run the steps yourself.
 
 ### Backend
 
 From the repository root:
 
 ```bash
-python -m venv .venv
+pyenv install -s "$(cat .python-version)"
+pyenv exec python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 ```
+
+pyenv reads `.python-version` automatically inside the repository, so `python` resolves to
+the pinned interpreter once the shim is on your `PATH`.
 
 The project has no Python lockfile: the exact versions of the direct dependencies are pinned
 with `==` in `pyproject.toml`, and CI audits the fully resolved tree with `pip-audit`.
@@ -49,12 +59,35 @@ Equivalent to `uvicorn server.app:app --reload`.
 ### Frontend
 
 ```bash
+corepack enable        # once per machine
 cd web
-npm install
-npm run dev
+pnpm install --frozen-lockfile
+pnpm run dev
 ```
 
-Or from the repo root: `make dev-web`.
+Or from the repo root: `make setup-web` and `make dev-web`.
+
+`web/package.json` pins the pnpm version in `packageManager`, so corepack (and pnpm
+itself) will switch to it automatically — you get the same pnpm as CI and the Docker
+build regardless of what you have installed globally.
+
+Two pnpm settings in `web/pnpm-workspace.yaml` are deliberate and worth knowing about:
+
+- `allowBuilds` — pnpm blocks dependency install scripts by default, the classic npm
+  supply-chain vector. Each one is allowed explicitly (only `esbuild` needs it, for its
+  native binary). If an install warns about ignored build scripts, add the package here
+  after checking why it needs one.
+- `minimumReleaseAge: 10080` — a new resolution will not pick a version published less
+  than 7 days ago, which is the window in which malicious publishes are usually caught.
+  It matches the `cooldown` in `.github/dependabot.yml` and does not affect
+  `--frozen-lockfile`, so CI and Docker stay deterministic. If an install fails with
+  `ERR_PNPM_NO_MATURE_MATCHING_VERSION`, lower the range in `package.json` to the newest
+  version that has aged in — do not add an exclusion just to get the newest release.
+
+pnpm uses a strict `node_modules`: a package can only import what it declares. That is
+intentional — it is what surfaced the missing `workbox-window` declaration that npm's
+hoisting had been hiding. If an import fails to resolve, the fix is almost always to
+declare the dependency, not to hoist it.
 
 In development, Vite **proxies** `/api` (and related auth routes) to `http://localhost:8000`. Keep the backend on port 8000 and use Vite’s dev port for the UI (typically 5173).
 
@@ -64,7 +97,7 @@ In development, Vite **proxies** `/api` (and related auth routes) to `http://loc
 make lint
 ```
 
-Invokes Ruff on `server/` and `tests/`, byte-compiles `server/` using the Make variable `PY` (defaults to `python`), then runs `npm run lint` and `npm run build` in `web/`.
+Invokes Ruff on `server/` and `tests/`, byte-compiles `server/` using the Make variable `PY` (defaults to `pyenv exec python`), then runs `pnpm run lint` and `pnpm run build` in `web/`.
 
 ### Tests
 
@@ -72,7 +105,9 @@ Invokes Ruff on `server/` and `tests/`, byte-compiles `server/` using the Make v
 make test
 ```
 
-Runs `pytest` via `PY -m pytest tests/`. Activate a Python 3.11+ venv first so `python` resolves correctly. On macOS, if the system `python3` is older than 3.11, run e.g. `PY=python3.11 make test`.
+Runs `pytest` via `PY -m pytest tests/`, where `PY` defaults to `pyenv exec python` so the
+interpreter comes from `.python-version` whether or not the venv is active. Without pyenv,
+point it at your own interpreter: `PY=python3.11 make test`.
 
 ### Docker image
 
