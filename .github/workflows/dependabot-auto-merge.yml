@@ -1,0 +1,75 @@
+# Auto-merge de las actualizaciones de bajo riesgo de Dependabot (patch y minor).
+#
+# ─── PARA ACTIVARLO HACEN FALTA DOS AJUSTES EN EL REPOSITORIO ───────────────────
+#   1. Settings → General → Pull Requests → «Allow auto-merge».
+#   2. Settings → Rules → un ruleset en `main` con «Require status checks to pass»
+#      exigiendo los checks de CI: "Python 3.11", "Python 3.12", "Python 3.13",
+#      "Frontend" y "Docker image".
+#
+# Sin (1) el auto-merge no existe y sin (2) se mergearía sin esperar a la CI. Mientras
+# «Allow auto-merge» esté desactivado este workflow no hace nada y termina en verde:
+# comprueba el ajuste antes de intentar nada.
+#
+# Seguridad: usa `pull_request_target`, que se ejecuta con permisos de escritura sobre
+# el repositorio base. Por eso NUNCA hace checkout ni ejecuta código del PR — sólo lee
+# metadatos y llama a la API. No añadir aquí pasos de build o de test.
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Comprobar si el auto-merge está habilitado en el repositorio
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          enabled=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.allow_auto_merge')
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != "true" ]; then
+            echo "El auto-merge está desactivado en este repositorio; no se hace nada." \
+              >> "$GITHUB_STEP_SUMMARY"
+            echo "Actívalo en Settings → General → Pull Requests → Allow auto-merge." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Obtener metadatos de Dependabot
+        id: meta
+        if: steps.gate.outputs.enabled == 'true'
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Los majors se revisan a mano. Todo lo demás (patch/minor, incluidas las
+      # actualizaciones de seguridad agrupadas) entra sólo si la CI pasa.
+      - name: Activar auto-merge (patch y minor)
+        if: >-
+          steps.gate.outputs.enabled == 'true' &&
+          steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+      - name: Etiquetar los majors para revisión manual
+        if: >-
+          steps.gate.outputs.enabled == 'true' &&
+          steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          echo "Actualización major: requiere revisión manual." >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR_URL" --body \
+            "Actualización **major**: el auto-merge no aplica. Requiere revisión manual."

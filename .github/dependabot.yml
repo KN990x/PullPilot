@@ -1,30 +1,155 @@
+# Estrategia: agrupar en vez de acumular.
+#
+# El problema que resuelve este fichero: `open-pull-requests-limit` SÓLO aplica a las
+# actualizaciones de versión. Las de seguridad son ilimitadas y, si no existe un grupo
+# con `applies-to: security-updates`, Dependabot abre **un PR por dependencia**. Eso es
+# lo que llevó a tener 19 PRs abiertos a la vez.
+#
+# Por cada ecosistema se definen como mucho tres grupos:
+#   *-security     -> todas las alertas de seguridad en UN solo PR (lo urgente)
+#   *-patch-minor  -> parches y minors en UN solo PR (mergeable casi a ciegas si CI pasa)
+#   *-major        -> majors en UN solo PR (revisión manual, pero sin goteo)
 version: 2
+
 updates:
+  # ---------------------------------------------------------------------------
+  # GitHub Actions
+  # ---------------------------------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 10
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci(deps)"
+    labels:
+      - "dependencies"
+      - "github_actions"
+    groups:
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      actions-all:
+        applies-to: version-updates
+        patterns:
+          - "*"
+
+  # ---------------------------------------------------------------------------
+  # Python (pyproject.toml). No hay lockfile: CI audita el árbol resuelto.
+  # ---------------------------------------------------------------------------
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 10
+      time: "06:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 5
+    # Evita el goteo de parches recién publicados y da margen a que se retiren
+    # releases defectuosas. No aplica a las actualizaciones de seguridad.
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "python"
+    groups:
+      python-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      python-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+        patterns:
+          - "*"
+      python-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+        patterns:
+          - "*"
+
+  # ---------------------------------------------------------------------------
+  # Frontend (web/)
+  # ---------------------------------------------------------------------------
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
       interval: "weekly"
       day: "monday"
-      time: "09:00"
-    open-pull-requests-limit: 10
+      time: "06:00"
+      timezone: "Europe/Madrid"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    # Las dependencias usan rangos `^`: sólo tocar package.json cuando el rango
+    # ya no admita la versión nueva. Con la estrategia por defecto (`increase`)
+    # Dependabot reescribe el manifiesto en cada parche y genera PRs redundantes.
+    versioning-strategy: increase-if-necessary
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "javascript"
+    # Congelados a propósito: subirlos es una migración, no una actualización.
+    #   react 19       -> cambios de API y de renderizado
+    #   tailwindcss 4  -> configuración CSS-first (@tailwindcss/postcss, index.css)
+    # Los avisos de seguridad IGNORAN esta lista, así que si aparece un CVE en
+    # cualquiera de ellos Dependabot abrirá el PR de todas formas.
     ignore:
-      - dependency-name: "*"
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
         update-types: ["version-update:semver-major"]
     groups:
-      dependencies:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      npm-patch-minor:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+        patterns:
+          - "*"
+      npm-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+        patterns:
+          - "*"
+
+  # ---------------------------------------------------------------------------
+  # Imágenes base del Dockerfile (node:24-alpine, python:3.11-slim).
+  # No estaban cubiertas: los CVE de la imagen base pasaban desapercibidos.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(docker)"
+    labels:
+      - "dependencies"
+    groups:
+      docker-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      docker-all:
+        applies-to: version-updates
         patterns:
           - "*"

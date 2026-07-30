@@ -1,30 +1,114 @@
+# Auditoría de dependencias.
+#
+# Nota de diseño: este workflow NO se ejecuta en cada pull request. Antes lo hacía, y
+# como fallaba de forma permanente en main desde 2026-04-28, TODOS los PRs de Dependabot
+# nacían con una ✗ y nadie los mergeaba. El gate de merge es ci.yml; esto es la alarma.
+# En PRs sólo corre cuando el propio PR toca los manifiestos de dependencias.
 name: Security audit
-
-permissions:
-  contents: read
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "web/package.json"
+      - "web/package-lock.json"
+      - "Dockerfile"
+  schedule:
+    # Lunes 05:30 UTC, antes de que Dependabot abra los PRs de la semana.
+    - cron: "30 5 * * 1"
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   pip-audit:
+    name: Python (pip-audit)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+
       - name: Install project
         run: |
           python -m pip install --upgrade pip
           python -m pip install .
+
       - name: Capture dependency pins for audit
         run: python -m pip freeze | grep -v -E '^pullpilot(==| @)' > /tmp/audit-req.txt
+
       - name: Install pip-audit
         run: python -m pip install pip-audit
+
       - name: Audit dependencies
-        run: pip-audit -r /tmp/audit-req.txt
+        run: |
+          {
+            echo "### pip-audit"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # `|| status=$?` es necesario: el shell por defecto corre con `-e` y un
+          # pip-audit fallido abortaría el script antes de cerrar el bloque markdown.
+          set -o pipefail
+          status=0
+          pip-audit -r /tmp/audit-req.txt 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  npm-audit:
+    name: Frontend (npm audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      # Bloqueante: sólo lo que acaba en el bundle servido a los usuarios.
+      - name: Audit production dependencies
+        working-directory: web
+        run: |
+          {
+            echo "### npm audit — dependencias de producción (bloqueante)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          status=0
+          npm audit --omit=dev --audit-level=high 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      # Informativo: el tooling de build (eslint, vite, workbox…) no se despliega.
+      # Además los avisos con rangos demasiado amplios producen falsos positivos aquí:
+      # p. ej. GHSA-mh99-v99m-4gvg declara `<= 5.0.7` para brace-expansion, lo que barre
+      # también las ramas de mantenimiento 1.x y 2.x, que sí están parcheadas.
+      - name: Audit full tree (informativo)
+        working-directory: web
+        continue-on-error: true
+        run: |
+          {
+            echo "### npm audit — árbol completo, incl. devDependencies (informativo)"
+            echo '```'
+            npm audit 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

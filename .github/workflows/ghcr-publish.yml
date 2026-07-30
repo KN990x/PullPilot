@@ -4,20 +4,23 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: write
-  packages: write
+# Sin permisos por defecto a nivel de workflow: cada job pide sólo lo suyo.
+permissions: {}
 
 jobs:
   build-and-push:
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # sólo para `gh release upload`
+      packages: write # publicar la imagen en GHCR
 
     steps:
       - name: Checkout tag
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -53,13 +56,18 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Procedencia y SBOM firmados junto a la imagen: permiten verificar de qué
+          # commit y con qué dependencias se construyó. No alteran la imagen en sí.
+          provenance: mode=max
+          sbom: true
 
       - name: Attach compose files to release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
         run: |
           cp .env.example env.example
-          gh release upload "${{ github.event.release.tag_name }}" \
+          gh release upload "$TAG_NAME" \
             docker-compose.yml \
             env.example \
             --clobber
