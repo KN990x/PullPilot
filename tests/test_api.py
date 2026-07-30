@@ -1,5 +1,6 @@
 import pytest
 import server.app as app_module
+import server.routers.projects as projects_router_module
 import server.services.projects as projects_module
 from fastapi.testclient import TestClient
 from server.database import SessionLocal
@@ -141,8 +142,10 @@ def test_update_passes_locale_to_logic(
         seen["locale"] = locale
         return True, []
 
+    # El router hace `from server.services.projects import ...`, así que el nombre
+    # queda fijado en su propio módulo: hay que parchear ahí, no en el de origen.
     monkeypatch.setattr(
-        projects_module, "update_single_project_logic", _fake
+        projects_router_module, "update_single_project_logic", _fake
     )
 
     r = client.post(
@@ -157,7 +160,7 @@ def test_update_failed_detail_english(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        projects_module,
+        projects_router_module,
         "update_single_project_logic",
         lambda _n, _db, **kw: (False, []),
     )
@@ -278,10 +281,12 @@ def test_update_rejects_project_path_outside_projects_root(
 def test_update_project_failure_hides_internal_logs_in_http_detail(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _fake_update(_name, _db):
+    def _fake_update(_name, _db, **_kw):
         return False, ["INTERNAL_DOCKER_STDERR_SECRET"]
 
-    monkeypatch.setattr(projects_module, "update_single_project_logic", _fake_update)
+    monkeypatch.setattr(
+        projects_router_module, "update_single_project_logic", _fake_update
+    )
 
     response = client.post("/api/projects/anything/update")
     assert response.status_code == 500

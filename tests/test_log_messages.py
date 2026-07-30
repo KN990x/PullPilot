@@ -1,5 +1,3 @@
-import pytest
-
 from server.locale.log_messages import normalize_locale, t
 
 

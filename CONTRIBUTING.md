@@ -19,8 +19,12 @@ From the repository root:
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e .
+pip install -e ".[dev]"
 ```
+
+The project has no Python lockfile: the exact versions of the direct dependencies are pinned
+with `==` in `pyproject.toml`, and CI audits the fully resolved tree with `pip-audit`.
+Install with `pip`; do not add a `uv.lock` unless the Docker build is migrated to `uv` as well.
 
 Relevant environment variables (adjust paths for your machine):
 
