@@ -7,6 +7,9 @@ import reactRefresh from "eslint-plugin-react-refresh";
 export default [
   { ignores: ["dist"] },
   js.configs.recommended,
+  // Desde eslint-plugin-react-hooks v6 los presets son flat config (arrays), no
+  // objetos con `.rules`: hay que esparcir el preset, no sus reglas.
+  ...reactHooks.configs["recommended-latest"],
   {
     files: ["**/*.{js,jsx}"],
     languageOptions: {
@@ -19,7 +22,6 @@ export default [
     },
     plugins: {
       react,
-      "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
     },
     settings: {
@@ -28,7 +30,6 @@ export default [
     rules: {
       "react/jsx-uses-vars": "error",
       "react/react-in-jsx-scope": "off",
-      ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
