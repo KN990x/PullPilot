@@ -1,0 +1,39 @@
+# Secretos y configuración local — NUNCA deben subirse (contienen AUTH_PASS / SESSION_SECRET)
+.env
+.env.*
+!.env.example
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+
+# Node / frontend
+node_modules/
+web/dist/
+web/build/
+web/coverage/
+.npm/
+
+# Datos de ejecución
+data/
+server/data/
+*.db
+*.sqlite
+*.sqlite3
+pullpilot.db
+
+# Editores y SO
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
