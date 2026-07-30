@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:25-alpine AS frontend-builder
 
 # corepack installs exactly the pnpm declared in `packageManager`, so the image uses
 # the same version as local development and CI.
@@ -18,7 +18,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # Keep this version in step with .python-version (pyenv) at the repo root.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 RUN apt-get update && apt-get install -y \
     docker.io \
