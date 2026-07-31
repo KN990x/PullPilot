@@ -1,4 +1,4 @@
-import { AlertTriangle, Languages, LogOut } from "lucide-react";
+import { AlertTriangle, Languages, LogOut, UserCircle } from "lucide-react";
 
 export default function Header({
   t,
@@ -6,6 +6,7 @@ export default function Header({
   isMockMode,
   activeTab,
   onChangeTab,
+  onOpenAccount,
   onToggleLanguage,
   onLogout,
 }) {
@@ -30,6 +31,17 @@ export default function Header({
             <span className="hidden lg:inline-flex items-center gap-1 text-xs font-mono bg-yellow-100 text-yellow-800 px-2 py-1 rounded border border-yellow-200">
               <AlertTriangle size={12} /> {t("app.demo_mode")}
             </span>
+          )}
+
+          {onOpenAccount && (
+            <button
+              onClick={onOpenAccount}
+              className="p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1"
+              title={t("account.open")}
+              aria-label={t("account.open")}
+            >
+              <UserCircle size={20} />
+            </button>
           )}
 
           <button

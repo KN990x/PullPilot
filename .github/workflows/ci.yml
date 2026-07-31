@@ -108,24 +108,40 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Smoke test (startup + healthcheck)
+      - name: Smoke test (cold start + setup wizard)
         run: |
-          docker run -d --name pullpilot-ci \
-            -e ALLOW_NO_AUTH=true \
-            -e SESSION_SECRET=ci-only-not-a-real-secret \
-            -p 8000:8000 \
-            pullpilot:ci
+          # Sin ninguna variable de auth: exactamente el arranque en frío que se lleva
+          # un usuario nuevo.
+          docker run -d --name pullpilot-ci -p 8000:8000 pullpilot:ci
+
           for _ in $(seq 1 30); do
-            status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/update-status || true)
-            if [ "$status" = "200" ] || [ "$status" = "401" ]; then
-              echo "Container is responding (HTTP $status)"
-              exit 0
+            if curl -fsS -o /tmp/status.json http://127.0.0.1:8000/api/auth/status; then
+              break
             fi
             sleep 2
           done
-          echo "::error::Container did not respond within 60s"
-          docker logs pullpilot-ci
-          exit 1
+          if ! [ -s /tmp/status.json ]; then
+            echo "::error::Container did not respond within 60s"
+            docker logs pullpilot-ci
+            exit 1
+          fi
+          echo "auth status: $(cat /tmp/status.json)"
+          grep -q '"setup_complete":false' /tmp/status.json
+
+          # La API está cerrada hasta completar el asistente.
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/projects)
+          [ "$code" = "401" ] || { echo "::error::/api/projects should be 401, got $code"; exit 1; }
+
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ciadmin","password":"ci-only-password","password_confirm":"ci-only-password"}' \
+            -c /tmp/cookies.txt http://127.0.0.1:8000/api/auth/setup)
+          [ "$code" = "201" ] || { echo "::error::setup should be 201, got $code"; docker logs pullpilot-ci; exit 1; }
+
+          code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/api/projects)
+          [ "$code" = "200" ] || { echo "::error::/api/projects with session should be 200, got $code"; exit 1; }
+
+          echo "Cold start, setup wizard and authenticated request all OK"
 
       - name: Cleanup
         if: always()

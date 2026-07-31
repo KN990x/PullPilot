@@ -3,8 +3,74 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from server.auth_policy import (
+    PASSWORD_MAX_LEN,
+    PASSWORD_MIN_LEN,
+    USERNAME_MAX_LEN,
+    USERNAME_MIN_LEN,
+    USERNAME_PATTERN,
+)
+
 CronFrequency = Literal["daily", "weekly", "monthly"]
 TaskType = Literal["cron", "date"]
+
+
+class SetupInput(BaseModel):
+    username: str = Field(
+        ...,
+        min_length=USERNAME_MIN_LEN,
+        max_length=USERNAME_MAX_LEN,
+        pattern=USERNAME_PATTERN,
+    )
+    password: str = Field(..., min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN)
+    password_confirm: str = Field(..., min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN)
+
+    @model_validator(mode="after")
+    def passwords_must_match(self) -> Self:
+        if self.password != self.password_confirm:
+            raise ValueError("Las contraseñas no coinciden")
+        return self
+
+
+class LoginInput(BaseModel):
+    username: str = Field(..., max_length=USERNAME_MAX_LEN)
+    password: str = Field(..., max_length=PASSWORD_MAX_LEN)
+
+
+class CredentialsInput(BaseModel):
+    current_password: str = Field(..., max_length=PASSWORD_MAX_LEN)
+    username: str | None = Field(
+        default=None,
+        min_length=USERNAME_MIN_LEN,
+        max_length=USERNAME_MAX_LEN,
+        pattern=USERNAME_PATTERN,
+    )
+    new_password: str | None = Field(
+        default=None, min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN
+    )
+    new_password_confirm: str | None = Field(
+        default=None, min_length=PASSWORD_MIN_LEN, max_length=PASSWORD_MAX_LEN
+    )
+
+    @model_validator(mode="after")
+    def check_change(self) -> Self:
+        if self.new_password is not None and self.new_password != self.new_password_confirm:
+            raise ValueError("Las contraseñas nuevas no coinciden")
+        if self.username is None and self.new_password is None:
+            raise ValueError("No hay nada que cambiar")
+        return self
+
+
+class AuthStatusOut(BaseModel):
+    setup_complete: bool
+    authenticated: bool
+    auth_enabled: bool
+    username: str | None = None
+
+
+class AuthResultOut(BaseModel):
+    status: Literal["ok"] = "ok"
+    username: str
 
 
 class Project(BaseModel):

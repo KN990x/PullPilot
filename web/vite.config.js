@@ -10,7 +10,9 @@ export default defineConfig({
       includeAssets: ["assets/logo.png"],
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
-        navigateFallbackDenylist: [/^\/login/, /^\/logout/],
+        // El login ya vive dentro de la SPA, así que el service worker debe servirle el
+        // shell. Lo único que nunca puede resolver con el shell es una llamada a la API.
+        navigateFallbackDenylist: [/^\/api\//],
       },
       manifest: {
         name: "PullPilot",

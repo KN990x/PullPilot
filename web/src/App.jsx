@@ -1,25 +1,33 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import AccountModal from "./components/AccountModal";
+import AuthLayout from "./components/AuthLayout";
 import Dashboard from "./components/Dashboard";
 import Footer from "./components/Footer";
 import Header from "./components/Header";
 import HistoryView from "./components/HistoryView";
+import LoginView from "./components/LoginView";
 import LogModal from "./components/LogModal";
 import ProgressBar from "./components/ProgressBar";
 import ScheduleView from "./components/ScheduleView";
+import SetupView from "./components/SetupView";
 import { usePolling } from "./hooks/usePolling";
 import {
+  changeCredentials,
   createSchedule,
   deleteSchedule,
+  fetchAuthStatus,
   fetchHistory,
   fetchProjects,
   fetchSchedules,
   fetchUpdateStatus,
   isBackendUnreachableError,
+  login,
   logout,
   normalizeUiLocale,
   SESSION_EXPIRED_ERROR,
+  setupCredentials,
   toggleProjectSetting,
   triggerUpdateAll,
   updateProject,
@@ -32,6 +40,27 @@ const DEFAULT_PROGRESS = {
   total: 0,
   current_project: "",
 };
+
+/** Traduce el `code` estable del backend a una clave de i18n. */
+const ERROR_KEYS = {
+  invalid_credentials: "auth.invalid_credentials",
+  invalid_current_password: "account.error_current_password",
+  setup_already_completed: "setup.error_already_done",
+  setup_disabled: "auth.generic_error",
+  setup_required: "auth.generic_error",
+  validation_error: "auth.validation_error",
+};
+
+function authErrorMessage(error, t) {
+  if (isBackendUnreachableError(error)) {
+    return t("auth.backend_unreachable");
+  }
+  if (error?.code === "rate_limited") {
+    return t("auth.rate_limited", { seconds: error.retryAfter ?? 60 });
+  }
+  const key = ERROR_KEYS[error?.code];
+  return key ? t(key) : t("auth.generic_error");
+}
 
 export default function App() {
   const { t, i18n } = useTranslation();
@@ -47,21 +76,37 @@ export default function App() {
   const [selectedFreq, setSelectedFreq] = useState("daily");
   const [progress, setProgress] = useState(DEFAULT_PROGRESS);
 
+  // loading | setup | login | ready. La SPA ya no redirige al servidor para autenticar:
+  // consulta /api/auth/status y decide qué pintar.
+  const [authState, setAuthState] = useState("loading");
+  const [authUsername, setAuthUsername] = useState(null);
+  const [authError, setAuthError] = useState(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountError, setAccountError] = useState(null);
+  const [accountSuccess, setAccountSuccess] = useState(false);
+
   const { startPolling, stopPolling } = usePolling();
 
   const handleUnauthorized = useCallback(() => {
     stopPolling();
-    if (window.location.pathname !== "/login") {
-      window.location.replace("/login");
-    }
+    setAuthUsername(null);
+    setAuthState("login");
+  }, [stopPolling]);
+
+  const handleSetupRequired = useCallback(() => {
+    stopPolling();
+    setAuthUsername(null);
+    setAuthState("setup");
   }, [stopPolling]);
 
   const requestContext = useMemo(
     () => ({
       onUnauthorized: handleUnauthorized,
+      onSetupRequired: handleSetupRequired,
       locale: normalizeUiLocale(i18n.language),
     }),
-    [handleUnauthorized, i18n.language]
+    [handleSetupRequired, handleUnauthorized, i18n.language]
   );
 
   const loadProjects = useCallback(async () => {
@@ -143,21 +188,172 @@ export default function App() {
     }
   }, [loadHistory, loadProjects, requestContext, startPolling, stopPolling]);
 
+  const bootstrap = useCallback(async () => {
+    try {
+      const status = await fetchAuthStatus({ locale: normalizeUiLocale(i18n.language) });
+      setAuthUsername(status.username ?? null);
+      if (!status.auth_enabled) {
+        setAuthState("ready");
+        return;
+      }
+      if (!status.setup_complete) {
+        setAuthState("setup");
+        return;
+      }
+      setAuthState(status.authenticated ? "ready" : "login");
+    } catch (error) {
+      // Mismo criterio que loadProjects: sin backend detrás se entra en modo demo. Un
+      // login sobre un backend que no existe no le sirve a nadie.
+      if (isBackendUnreachableError(error)) {
+        console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
+        setIsMockMode(true);
+        setAuthState("ready");
+        return;
+      }
+      console.error("Error consultando el estado de autenticación", error);
+      setAuthState("login");
+    }
+    // i18n.language solo alimenta la cabecera Accept-Language; no hace falta re-ejecutar
+    // el bootstrap al cambiar de idioma.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
+    bootstrap();
+  }, [bootstrap]);
+
+  useEffect(() => {
+    // Sin sesión no se piden datos: antes las cuatro llamadas salían siempre y las
+    // cuatro respondían 401.
+    if (authState !== "ready") {
+      return undefined;
+    }
     loadProjects();
     loadHistory();
     loadSchedules();
     checkProgress();
     return () => stopPolling();
-  }, [checkProgress, loadHistory, loadProjects, loadSchedules, stopPolling]);
+  }, [authState, checkProgress, loadHistory, loadProjects, loadSchedules, stopPolling]);
 
   const handleLogout = async () => {
     try {
-      await logout();
-      window.location.href = "/login";
+      await logout(requestContext);
     } catch (error) {
       console.error("Error logging out", error);
     }
+    stopPolling();
+    setProjects([]);
+    setHistory([]);
+    setSchedules([]);
+    setProgress(DEFAULT_PROGRESS);
+    setAuthUsername(null);
+    setAuthError(null);
+    setAuthState("login");
+  };
+
+  const handleSetupSubmit = async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    const password = formData.get("password");
+    const passwordConfirm = formData.get("password_confirm");
+
+    if (password !== passwordConfirm) {
+      setAuthError(t("setup.error_mismatch"));
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const result = await setupCredentials(
+        { username: formData.get("username"), password, password_confirm: passwordConfirm },
+        requestContext
+      );
+      setAuthUsername(result.username);
+      setAuthState("ready");
+    } catch (error) {
+      console.error("Error en la configuración inicial", error);
+      setAuthError(authErrorMessage(error, t));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleLoginSubmit = async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const result = await login(
+        { username: formData.get("username"), password: formData.get("password") },
+        requestContext
+      );
+      setAuthUsername(result.username);
+      setAuthState("ready");
+    } catch (error) {
+      if (error?.code === "setup_required") {
+        setAuthState("setup");
+        setAuthError(null);
+        return;
+      }
+      setAuthError(authErrorMessage(error, t));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleChangeCredentials = async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    const form = event.target;
+
+    const newUsername = (formData.get("username") || "").trim();
+    const newPassword = formData.get("new_password") || "";
+    const newPasswordConfirm = formData.get("new_password_confirm") || "";
+
+    if (newPassword && newPassword !== newPasswordConfirm) {
+      setAccountError(t("account.error_mismatch"));
+      return;
+    }
+
+    const payload = { current_password: formData.get("current_password") };
+    if (newUsername && newUsername !== authUsername) {
+      payload.username = newUsername;
+    }
+    if (newPassword) {
+      payload.new_password = newPassword;
+      payload.new_password_confirm = newPasswordConfirm;
+    }
+    if (!payload.username && !payload.new_password) {
+      setAccountError(t("account.error_nothing_to_change"));
+      return;
+    }
+
+    setAuthSubmitting(true);
+    setAccountError(null);
+    try {
+      const result = await changeCredentials(payload, requestContext);
+      setAuthUsername(result.username);
+      setAccountSuccess(true);
+      form.reset();
+      setTimeout(() => {
+        setAccountOpen(false);
+        setAccountSuccess(false);
+      }, 2500);
+    } catch (error) {
+      console.error("Error cambiando las credenciales", error);
+      setAccountError(authErrorMessage(error, t));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleCloseAccount = () => {
+    setAccountOpen(false);
+    setAccountError(null);
+    setAccountSuccess(false);
   };
 
   const handleUpdateProject = async (name) => {
@@ -358,6 +554,36 @@ export default function App() {
     return expression;
   };
 
+  if (authState === "loading") {
+    return <AuthLayout t={t} i18n={i18n} onToggleLanguage={toggleLanguage} loading />;
+  }
+
+  if (authState === "setup") {
+    return (
+      <SetupView
+        t={t}
+        i18n={i18n}
+        onToggleLanguage={toggleLanguage}
+        onSubmit={handleSetupSubmit}
+        submitting={authSubmitting}
+        error={authError}
+      />
+    );
+  }
+
+  if (authState === "login") {
+    return (
+      <LoginView
+        t={t}
+        i18n={i18n}
+        onToggleLanguage={toggleLanguage}
+        onSubmit={handleLoginSubmit}
+        submitting={authSubmitting}
+        error={authError}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
       <Header
@@ -366,6 +592,8 @@ export default function App() {
         isMockMode={isMockMode}
         activeTab={activeTab}
         onChangeTab={setActiveTab}
+        // En modo demo no hay backend contra el que cambiar nada.
+        onOpenAccount={isMockMode ? undefined : () => setAccountOpen(true)}
         onToggleLanguage={toggleLanguage}
         onLogout={handleLogout}
       />
@@ -409,6 +637,17 @@ export default function App() {
         )}
 
         <LogModal t={t} selectedLog={selectedLog} onClose={() => setSelectedLog(null)} />
+
+        <AccountModal
+          t={t}
+          open={accountOpen}
+          username={authUsername}
+          onClose={handleCloseAccount}
+          onSubmit={handleChangeCredentials}
+          submitting={authSubmitting}
+          error={accountError}
+          success={accountSuccess}
+        />
       </main>
 
       <Footer t={t} />

@@ -1,5 +1,4 @@
 import pytest
-import server.app as app_module
 import server.routers.projects as projects_router_module
 import server.services.projects as projects_module
 from fastapi.testclient import TestClient
@@ -194,14 +193,12 @@ def test_build_trigger_rejects_short_cron() -> None:
         build_trigger("cron", "1 2 3")
 
 
-def test_api_requires_session_when_auth_enabled(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(app_module, "AUTH_USER", "admin")
-    monkeypatch.setattr(app_module, "AUTH_PASS", "secret")
-    response = client.get("/api/projects")
+def test_api_requires_session_when_auth_enabled(logged_in_client: TestClient) -> None:
+    logged_in_client.post("/api/auth/logout")
+    response = logged_in_client.get("/api/projects")
     assert response.status_code == 401
     assert response.json().get("detail") == "Sesión expirada"
+    assert response.json().get("code") == "session_expired"
 
 
 def test_scan_syncs_stored_project_path(
@@ -293,32 +290,39 @@ def test_update_project_failure_hides_internal_logs_in_http_detail(
     assert "INTERNAL_DOCKER" not in response.text
 
 
-def test_validate_startup_requires_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_startup_no_longer_requires_env_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin credenciales el arranque sigue adelante: las crea el asistente por UI."""
     import server.config as cfg
 
     monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", False)
-    monkeypatch.setattr(cfg, "AUTH_USER", None)
-    monkeypatch.setattr(cfg, "AUTH_PASS", None)
-    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
-    with pytest.raises(RuntimeError, match="AUTH_USER"):
-        cfg.validate_startup_security()
-
-
-def test_validate_startup_allows_explicit_no_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    import server.config as cfg
-
-    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", True)
-    monkeypatch.setattr(cfg, "AUTH_USER", None)
-    monkeypatch.setattr(cfg, "AUTH_PASS", None)
+    monkeypatch.setattr(cfg, "AUTH_SEED_USER", None)
+    monkeypatch.setattr(cfg, "AUTH_SEED_PASS", None)
     monkeypatch.delenv("UVICORN_WORKERS", raising=False)
     cfg.validate_startup_security()
 
 
-def test_validate_startup_workers_require_session_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_startup_warns_on_explicit_no_auth(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import server.config as cfg
+
+    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", True)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    with caplog.at_level("WARNING", logger="pullpilot"):
+        cfg.validate_startup_security()
+    assert "ALLOW_NO_AUTH" in caplog.text
+
+
+def test_validate_startup_warns_on_multiple_workers(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ya no es un error: el secreto se comparte por fichero. Lo que duplica es el scheduler."""
     import server.config as cfg
 
     monkeypatch.setenv("UVICORN_WORKERS", "2")
-    monkeypatch.setattr(cfg, "_SESSION_SECRET_SET", False)
-    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", True)
-    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
+    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", False)
+    with caplog.at_level("WARNING", logger="pullpilot"):
         cfg.validate_startup_security()
+    assert "UVICORN_WORKERS=2" in caplog.text

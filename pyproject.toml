@@ -33,9 +33,6 @@ include-package-data = true
 where = ["."]
 include = ["server*"]
 
-[tool.setuptools.package-data]
-server = ["templates/*.html"]
-
 [tool.ruff]
 target-version = "py311"
 src = ["server", "tests"]

@@ -1,5 +1,8 @@
 export const API_URL = "/api";
+// Centinela interno del frontend: lo lanza handleAuthError para que los `catch` sepan
+// que la redirección ya está en marcha y no muestren un error encima.
 export const SESSION_EXPIRED_ERROR = "Sesión expirada";
+export const SETUP_REQUIRED_ERROR = "Configuración inicial pendiente";
 
 /** Normaliza a es | en (alineado con el backend). */
 export function normalizeUiLocale(lang) {
@@ -25,8 +28,27 @@ function projectSegment(name) {
   return encodeURIComponent(name);
 }
 
+/** Lee el `code` del cuerpo de un 401 sin consumir el body original del llamador. */
+async function peekErrorCode(response) {
+  try {
+    const data = await response.clone().json();
+    return data && typeof data === "object" ? data.code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function handleAuthError(response, options = {}) {
   if (response.status === 401) {
+    const code = await peekErrorCode(response);
+    // Alguien vació la base de datos con la pestaña abierta: hay que volver al
+    // asistente, no a la pantalla de login.
+    if (code === "setup_required") {
+      if (typeof options.onSetupRequired === "function") {
+        options.onSetupRequired();
+      }
+      throw new Error(SETUP_REQUIRED_ERROR);
+    }
     if (typeof options.onUnauthorized === "function") {
       options.onUnauthorized();
     }
@@ -35,14 +57,42 @@ export async function handleAuthError(response, options = {}) {
   return response;
 }
 
-async function request(path, options = {}, context = {}) {
+function buildHeaders(options, context) {
   const headers = new Headers(options.headers ?? undefined);
   if (context.locale) {
     headers.set("Accept-Language", context.locale);
   }
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  return headers;
+}
+
+async function request(path, options = {}, context = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: buildHeaders(options, context),
+  });
   await handleAuthError(response, context);
   return response;
+}
+
+/**
+ * Igual que `request` pero sin el manejador global de 401: en los endpoints de
+ * autenticación un 401 significa "credenciales incorrectas", no "sesión caducada".
+ */
+async function publicRequestJson(path, options = {}, context = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: buildHeaders(options, context),
+  });
+  await assertOk(response);
+  return readJsonBody(response);
+}
+
+function jsonBody(payload) {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  };
 }
 
 async function readJsonBody(response) {
@@ -79,7 +129,15 @@ async function assertOk(response) {
     } catch (err) {
       throw err instanceof Error ? err : new Error(String(err));
     }
-    throw new Error(errorMessageFromBody(data, response.status));
+    const error = new Error(errorMessageFromBody(data, response.status));
+    // `code` es el slug estable del backend; es lo que elige la clave de i18n en los
+    // formularios de autenticación. El mensaje queda para curl y para la consola.
+    error.status = response.status;
+    if (data && typeof data === "object") {
+      error.code = data.code;
+      error.retryAfter = data.retry_after;
+    }
+    throw error;
   }
 }
 
@@ -148,6 +206,22 @@ export async function deleteSchedule(id, context = {}) {
   await assertOk(response);
 }
 
-export async function logout() {
-  await fetch("/logout", { method: "POST" });
+export function fetchAuthStatus(context = {}) {
+  return publicRequestJson("/auth/status", {}, context);
+}
+
+export function setupCredentials(payload, context = {}) {
+  return publicRequestJson("/auth/setup", jsonBody(payload), context);
+}
+
+export function login(payload, context = {}) {
+  return publicRequestJson("/auth/login", jsonBody(payload), context);
+}
+
+export function logout(context = {}) {
+  return publicRequestJson("/auth/logout", { method: "POST" }, context);
+}
+
+export function changeCredentials(payload, context = {}) {
+  return publicRequestJson("/auth/credentials", jsonBody(payload), context);
 }

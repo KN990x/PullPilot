@@ -38,3 +38,12 @@ def record_login_failure(client_ip: str) -> None:
 
 def clear_login_failures(client_ip: str) -> None:
     _failed_attempts.pop(client_ip, None)
+
+
+def seconds_until_reset(client_ip: str) -> int:
+    """Segundos que faltan para que caduque el intento más antiguo de la ventana."""
+    times = _failed_attempts.get(client_ip)
+    if not times:
+        return 0
+    remaining = LOGIN_RATE_LIMIT_WINDOW_SEC - (time.time() - min(times))
+    return max(1, int(remaining))

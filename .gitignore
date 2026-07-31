@@ -32,10 +32,13 @@ yarn.lock
 # Runtime data
 data/
 server/data/
+# DATA_DIR de `make dev-server`: base de datos y secreto de sesión locales.
+.devdata/
 *.db
 *.sqlite
 *.sqlite3
 pullpilot.db
+session_secret.key
 
 # Local agent instructions: not part of the project
 AGENTS.md

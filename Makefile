@@ -11,7 +11,7 @@ PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 # web/package.json, so `corepack pnpm` gives everyone the same pnpm.
 PNPM ?= corepack pnpm
 
-.PHONY: dev-server dev-web setup setup-web build up lint test
+.PHONY: dev-server dev-server-open dev-web setup setup-web build up lint test
 
 # Sets up the backend environment with the Python version from .python-version.
 setup:
@@ -24,8 +24,17 @@ setup:
 setup-web:
 	cd web && $(PNPM) install --frozen-lockfile
 
+# DATA_DIR es obligatorio en local: por defecto apunta a /app/data, que fuera del
+# contenedor no se puede crear (en macOS la raíz es de solo lectura y el import de
+# server/config.py revienta). Aquí viven la base de datos y el secreto de sesión, así que
+# el asistente de configuración se prueba igual que en producción; borra .devdata para
+# volver a verlo desde cero.
 dev-server:
-	ALLOW_NO_AUTH=true uvicorn server.app:app --reload
+	DATA_DIR=.devdata uvicorn server.app:app --reload
+
+# Igual que dev-server pero con la autenticación desactivada, para trastear rápido.
+dev-server-open:
+	DATA_DIR=.devdata ALLOW_NO_AUTH=true uvicorn server.app:app --reload
 
 dev-web:
 	cd web && $(PNPM) run dev
