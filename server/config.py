@@ -1,30 +1,64 @@
+"""Configuración de PullPilot.
+
+Filosofía: **no hay nada que configurar**. Las credenciales las crea el asistente en el
+primer arranque y viven hasheadas en la base de datos; el secreto de firma de sesión se
+genera y persiste solo. Lo único que un usuario necesita decidir es dónde están sus
+stacks, en qué puerto escucha y en qué zona horaria vive.
+
+Todo lo demás son constantes. Si algo de aquí abajo vuelve a convertirse en variable de
+entorno, que sea porque alguien tenía un problema real que no se podía resolver de otra
+forma.
+"""
+
 import logging
 import os
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from server.secret_store import SECRET_FILENAME, load_or_create_session_secret
 
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.lower() == "true"
-
-
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
-# Same default path as official docker-compose bind mount; PROJECTS_ROOT overrides.
-DEFAULT_STACKS_ROOT = "/srv/docker-stacks"
-PROJECTS_ROOT = Path(
-    os.getenv("PROJECTS_ROOT") or os.getenv("DOCKER_ROOT_PATH", DEFAULT_STACKS_ROOT)
-)
-DB_PATH = DATA_DIR / "pullpilot.db"
-_static_override = os.getenv("STATIC_DIR", "").strip()
-STATIC_DIR = Path(_static_override) if _static_override else BASE_DIR / "static"
 
+# --- Las tres variables documentadas -----------------------------------------------
+
+# Carpeta de stacks. Misma ruta absoluta en el host y dentro del contenedor.
+# DOCKER_ROOT_PATH y PROJECTS_ROOT se siguen leyendo como alias: quien ya tenía un .env
+# de una versión anterior no se queda sin proyectos al actualizar.
+DEFAULT_STACKS_ROOT = "/srv/docker-stacks"
+STACKS_PATH = Path(
+    os.getenv("STACKS_PATH")
+    or os.getenv("DOCKER_ROOT_PATH")
+    or os.getenv("PROJECTS_ROOT")
+    or DEFAULT_STACKS_ROOT
+)
+# Nombre histórico, el que usan los servicios y los mensajes de error.
+PROJECTS_ROOT = STACKS_PATH
+
+# TZ y el puerto los consume Docker, no este proceso: TZ la lee la libc y el puerto lo
+# publica el compose. Aquí solo se fija un valor por defecto sensato.
 os.environ.setdefault("TZ", "UTC")
+
+# URL pública cuando hay un proxy inverso delante. Es opcional y de ella se derivan las
+# dos cosas que antes eran variables sueltas.
+PUBLIC_URL = (os.getenv("PUBLIC_URL") or "").strip()
+_public_scheme = urlparse(PUBLIC_URL).scheme if PUBLIC_URL else ""
+# Cookie con Secure solo si la URL pública es https: ponerlo sobre http dejaría al
+# navegador sin enviar la cookie y el login no funcionaría nunca.
+SESSION_HTTPS_ONLY = _public_scheme == "https"
+# Con proxy delante, la IP del cliente para el rate limit está en X-Forwarded-For.
+TRUST_X_FORWARDED_FOR = bool(PUBLIC_URL)
+
+# --- Rutas internas ------------------------------------------------------------------
+
+# No se documenta: dentro del contenedor siempre es /app/data (volumen `pullpilot_data`).
+# Fuera, `make dev-server` la apunta a .devdata.
+DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
+DB_PATH = DATA_DIR / "pullpilot.db"
+# El bundle de Vite se copia dentro del propio paquete: no hace falta ninguna variable
+# para localizarlo (ver Dockerfile).
+STATIC_DIR = BASE_DIR / "static"
+
 # DATA_DIR y el logging van antes que nada: el secreto de sesión se escribe ahí y
 # avisa por log si algo falla.
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -35,86 +69,41 @@ logging.basicConfig(
 )
 logger = logging.getLogger("pullpilot")
 
-HEALTHCHECK_TIMEOUT = int(os.getenv("HEALTHCHECK_TIMEOUT", "60"))
-COMMAND_TIMEOUT = int(os.getenv("COMMAND_TIMEOUT", "300"))
+# --- Constantes ----------------------------------------------------------------------
 
+# Espera tras el despliegue a que los contenedores queden sanos, y tope de cualquier
+# comando externo (`git pull`, `docker compose ...`).
+HEALTHCHECK_TIMEOUT = 60
+COMMAND_TIMEOUT = 300
+
+# Idioma de los logs de las tareas programadas. Es lo único que no puede deducirse de la
+# petición: las lanza el scheduler, sin navegador detrás del que leer Accept-Language.
+# Las actualizaciones disparadas desde la interfaz usan el idioma del navegador.
 _raw_log_locale = (os.getenv("LOG_LOCALE") or "es").strip().lower()
 LOG_LOCALE: Literal["es", "en"] = (
     _raw_log_locale if _raw_log_locale in ("es", "en") else "es"
 )
 
-# Las credenciales viven hasheadas en la base de datos y se crean por UI en el primer
-# arranque. AUTH_USER/AUTH_PASS solo sirven ya como semilla para migrar instalaciones
-# antiguas sin que el usuario tenga que volver a pasar por el asistente.
-AUTH_SEED_USER = os.getenv("AUTH_USER") or None
-AUTH_SEED_PASS = os.getenv("AUTH_PASS") or None
-# Escotilla heredada: deja la API completamente abierta y desactiva el asistente.
-ALLOW_NO_AUTH = _env_bool("ALLOW_NO_AUTH", False)
+# Cookie de sesión: 30 días, firmada, SameSite=lax. `none` exigiría HTTPS y abriría la
+# puerta a peticiones cross-site; `strict` no aporta nada en una app que se sirve a sí
+# misma. Nadie necesita elegir aquí.
+SESSION_MAX_AGE = 30 * 24 * 60 * 60
+SESSION_COOKIE_NAME = "pullpilot_session"
+SESSION_SAME_SITE: Literal["lax"] = "lax"
 
-SESSION_SECRET, SESSION_SECRET_SOURCE = load_or_create_session_secret(
-    DATA_DIR, os.getenv("SESSION_SECRET") or None
-)
-# True cuando el secreto es estable entre reinicios (entorno o fichero persistente).
-_SESSION_SECRET_SET = SESSION_SECRET_SOURCE != "ephemeral"
-SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", False)
-_raw_same_site = os.getenv("SESSION_SAME_SITE", "lax").strip().lower()
-SESSION_SAME_SITE: Literal["lax", "strict", "none"] = (
-    _raw_same_site if _raw_same_site in ("lax", "strict", "none") else "lax"
-)
-
-# Comma-separated; empty = allow any origin (the SPA served by FastAPI itself usually needs no CORS).
-_raw_cors = os.getenv("CORS_ORIGINS", "").strip()
-CORS_ORIGINS: list[str] = (
-    ["*"]
-    if not _raw_cors
-    else [o.strip() for o in _raw_cors.split(",") if o.strip()]
-)
-
-LOGIN_RATE_LIMIT_ENABLED = _env_bool("LOGIN_RATE_LIMIT_ENABLED", True)
-LOGIN_RATE_LIMIT_MAX = int(os.getenv("LOGIN_RATE_LIMIT_MAX", "15"))
-LOGIN_RATE_LIMIT_WINDOW_SEC = int(os.getenv("LOGIN_RATE_LIMIT_WINDOW_SEC", "300"))
-
-# Behind a trusted reverse proxy: use the first X-Forwarded-For IP for login rate limiting.
-TRUST_X_FORWARDED_FOR = _env_bool("TRUST_X_FORWARDED_FOR", False)
-
-
-def _parse_workers(raw: str | None) -> int:
-    try:
-        return int(raw or "1")
-    except ValueError:
-        return 1
+# El secreto se genera y persiste en $DATA_DIR/session_secret.key con permisos 0600.
+SESSION_SECRET, SESSION_SECRET_SOURCE = load_or_create_session_secret(DATA_DIR)
 
 
 def validate_startup_security() -> None:
-    """Avisos de arranque. Ya no aborta: la primera instalación se resuelve por UI."""
-    workers = _parse_workers(os.getenv("UVICORN_WORKERS"))
-    if workers > 1:
-        # El secreto ya se comparte entre workers vía fichero, así que esto dejó de ser
-        # un error. El problema que queda es otro: APScheduler arranca en el lifespan de
-        # cada worker, o sea N schedulers actualizando los mismos contenedores a la vez.
-        logger.warning(
-            "UVICORN_WORKERS=%s. El scheduler, el límite de intentos de login y el "
-            "estado de progreso son por proceso: con más de un worker las tareas "
-            "programadas se duplican. Usa un solo worker.",
-            workers,
-        )
-
+    """Avisos de arranque. No aborta: la primera instalación se resuelve por UI."""
     if SESSION_SECRET_SOURCE == "ephemeral":
         logger.warning(
             "No se pudo persistir el secreto de sesión en %s: se usa uno en memoria y "
             "las sesiones caducarán en cada reinicio. Revisa que %s exista y sea "
-            "escribible, o define SESSION_SECRET en el entorno.",
+            "escribible.",
             DATA_DIR / SECRET_FILENAME,
             DATA_DIR,
         )
     elif SESSION_SECRET_SOURCE == "file":
-        logger.info(
-            "Secreto de sesión persistente en %s.", DATA_DIR / SECRET_FILENAME
-        )
-
-    if ALLOW_NO_AUTH:
-        logger.warning(
-            "ALLOW_NO_AUTH=true: la API no exige login y el asistente de configuración "
-            "queda desactivado. Variable obsoleta; quítala del .env salvo en una red "
-            "totalmente aislada."
-        )
+        logger.info("Secreto de sesión persistente en %s.", DATA_DIR / SECRET_FILENAME)

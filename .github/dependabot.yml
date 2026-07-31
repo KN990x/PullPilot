@@ -151,6 +151,20 @@ updates:
       prefix: "chore(docker)"
     labels:
       - "dependencies"
+    # Frozen on purpose, same criterion as react and tailwind above: bumping a base image
+    # major is a migration, not an update.
+    #   node    -> 25 dropped corepack, so `corepack enable` fails with exit 127; and odd
+    #              majors are not LTS.
+    #   python  -> has to stay in step with .python-version (3.11.x).
+    #   docker  -> the CLI whose compose plugin is copied into the image.
+    # Security advisories IGNORE this list, so a CVE on any of them still opens a PR.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "docker"
+        update-types: ["version-update:semver-major"]
     groups:
       docker-security:
         applies-to: security-updates

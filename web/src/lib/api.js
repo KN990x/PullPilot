@@ -123,7 +123,7 @@ function errorMessageFromBody(data, status) {
 
 async function assertOk(response) {
   if (!response.ok) {
-    let data = null;
+    let data;
     try {
       data = await readJsonBody(response);
     } catch (err) {

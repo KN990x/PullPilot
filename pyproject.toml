@@ -33,6 +33,12 @@ include-package-data = true
 where = ["."]
 include = ["server*"]
 
+# The built SPA, which the Docker build drops into server/static before `pip install`.
+# Declared explicitly because `include-package-data` alone relies on MANIFEST.in or a
+# revision-control plugin, and neither exists inside the image build.
+[tool.setuptools.package-data]
+server = ["static/**/*"]
+
 [tool.ruff]
 target-version = "py311"
 src = ["server", "tests"]

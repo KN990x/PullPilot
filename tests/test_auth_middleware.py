@@ -48,22 +48,6 @@ def test_status_endpoint_is_reachable_in_every_state(auth_client: TestClient) ->
     assert auth_client.get("/api/auth/status").status_code == 200
 
 
-def test_open_access_lets_everything_through(client: TestClient) -> None:
-    """ALLOW_NO_AUTH sigue funcionando como escotilla, sin asistente."""
-    assert client.get("/api/projects").status_code == 200
-    assert client.get("/api/auth/status").json()["auth_enabled"] is False
-
-
-def test_setup_is_disabled_under_open_access(client: TestClient) -> None:
-    response = client.post(
-        "/api/auth/setup",
-        json={"username": "admin", "password": "supersecreta", "password_confirm": "supersecreta"},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["code"] == "setup_disabled"
-
-
 def test_session_from_a_previous_token_version_is_rejected(logged_in_client: TestClient) -> None:
     """Simula el reinicio tras un cambio de credenciales hecho por otro worker."""
     assert logged_in_client.get("/api/projects").status_code == 200

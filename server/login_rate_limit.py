@@ -5,32 +5,27 @@ from __future__ import annotations
 import time
 from collections import defaultdict
 
-from server.config import (
-    LOGIN_RATE_LIMIT_ENABLED,
-    LOGIN_RATE_LIMIT_MAX,
-    LOGIN_RATE_LIMIT_WINDOW_SEC,
-)
+# Constantes, no configuración: 15 fallos en 5 minutos frena la fuerza bruta sin estorbar
+# a quien se equivoca de contraseña un par de veces. Nadie tenía motivo para tocarlo, y
+# desactivarlo desde el entorno solo servía para dispararse en el pie.
+MAX_ATTEMPTS = 15
+WINDOW_SEC = 300
 
 _failed_attempts: dict[str, list[float]] = defaultdict(list)
 
 
 def _prune_old(ip: str, now: float) -> None:
-    window = LOGIN_RATE_LIMIT_WINDOW_SEC
     times = _failed_attempts[ip]
-    _failed_attempts[ip] = [t for t in times if now - t < window]
+    _failed_attempts[ip] = [t for t in times if now - t < WINDOW_SEC]
 
 
 def is_login_rate_limited(client_ip: str) -> bool:
-    if not LOGIN_RATE_LIMIT_ENABLED:
-        return False
     now = time.time()
     _prune_old(client_ip, now)
-    return len(_failed_attempts[client_ip]) >= LOGIN_RATE_LIMIT_MAX
+    return len(_failed_attempts[client_ip]) >= MAX_ATTEMPTS
 
 
 def record_login_failure(client_ip: str) -> None:
-    if not LOGIN_RATE_LIMIT_ENABLED:
-        return
     now = time.time()
     _prune_old(client_ip, now)
     _failed_attempts[client_ip].append(now)
@@ -45,5 +40,5 @@ def seconds_until_reset(client_ip: str) -> int:
     times = _failed_attempts.get(client_ip)
     if not times:
         return 0
-    remaining = LOGIN_RATE_LIMIT_WINDOW_SEC - (time.time() - min(times))
+    remaining = WINDOW_SEC - (time.time() - min(times))
     return max(1, int(remaining))

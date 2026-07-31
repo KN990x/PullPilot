@@ -1,22 +1,13 @@
 # Dependency auditing.
 #
-# Design note: this workflow does NOT run on every pull request. It used to, and since
-# it had been failing permanently on main from 2026-04-28 onwards, EVERY Dependabot PR
-# was born with a ✗ and none of them were merged. The merge gate is ci.yml; this is the
-# alarm. On PRs it only runs when the PR itself touches the dependency manifests.
+# Design note: this workflow is an ALARM, not a merge gate — that is ci.yml, and it is
+# the only check on a pull request. So this one never runs on `push` or `pull_request`:
+# it used to, it stayed red on main for weeks, and every Dependabot PR was born with a ✗
+# that nobody could clear. A weekly run plus a manual trigger gives the same signal
+# without decorating every PR with it.
 name: Security audit
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-    paths:
-      - "pyproject.toml"
-      - "web/package.json"
-      - "web/pnpm-lock.yaml"
-      - "web/pnpm-workspace.yaml"
-      - "Dockerfile"
   schedule:
     # Mondays 05:30 UTC, before Dependabot opens the week's PRs.
     - cron: "30 5 * * 1"
@@ -76,7 +67,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
 

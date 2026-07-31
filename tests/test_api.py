@@ -272,7 +272,7 @@ def test_update_rejects_project_path_outside_projects_root(
     assert response.status_code == 500
     detail = response.json().get("detail", "")
     assert "historial" in detail.lower()
-    assert "PROJECTS_ROOT" not in detail
+    assert "STACKS_PATH" not in detail
 
 
 def test_update_project_failure_hides_internal_logs_in_http_detail(
@@ -290,39 +290,23 @@ def test_update_project_failure_hides_internal_logs_in_http_detail(
     assert "INTERNAL_DOCKER" not in response.text
 
 
-def test_validate_startup_no_longer_requires_env_credentials(
+def test_validate_startup_does_not_require_anything(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Sin credenciales el arranque sigue adelante: las crea el asistente por UI."""
     import server.config as cfg
 
-    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", False)
-    monkeypatch.setattr(cfg, "AUTH_SEED_USER", None)
-    monkeypatch.setattr(cfg, "AUTH_SEED_PASS", None)
-    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "file")
     cfg.validate_startup_security()
 
 
-def test_validate_startup_warns_on_explicit_no_auth(
+def test_validate_startup_warns_on_an_ephemeral_secret(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Volumen no escribible: se arranca igual, pero las sesiones no sobreviven."""
     import server.config as cfg
 
-    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", True)
-    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "ephemeral")
     with caplog.at_level("WARNING", logger="pullpilot"):
         cfg.validate_startup_security()
-    assert "ALLOW_NO_AUTH" in caplog.text
-
-
-def test_validate_startup_warns_on_multiple_workers(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Ya no es un error: el secreto se comparte por fichero. Lo que duplica es el scheduler."""
-    import server.config as cfg
-
-    monkeypatch.setenv("UVICORN_WORKERS", "2")
-    monkeypatch.setattr(cfg, "ALLOW_NO_AUTH", False)
-    with caplog.at_level("WARNING", logger="pullpilot"):
-        cfg.validate_startup_security()
-    assert "UVICORN_WORKERS=2" in caplog.text
+    assert "secreto de sesión" in caplog.text

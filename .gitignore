@@ -20,6 +20,9 @@ env/
 # Node / frontend
 node_modules/
 web/dist/
+# Bundle de Vite dentro del paquete: lo genera el build de Docker (y quien quiera probar
+# el fallback 404 -> SPA en local copiando web/dist aquí).
+server/static/
 web/build/
 web/coverage/
 .npm/

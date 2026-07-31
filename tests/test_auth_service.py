@@ -140,23 +140,12 @@ def test_change_credentials_without_setup(db_session: Session) -> None:
         )
 
 
-def test_seed_from_env_creates_the_row(db_session: Session) -> None:
-    assert auth_service.seed_from_env(db_session, username="admin", password="supersecreta") is True
-    assert auth_service.verify_credentials(db_session, username="admin", password="supersecreta")
-
-
-@pytest.mark.parametrize(
-    ("username", "password"),
-    [(None, "supersecreta"), ("admin", None), (None, None), ("admin", "corta")],
-)
-def test_seed_from_env_no_ops(db_session: Session, username, password) -> None:
-    assert auth_service.seed_from_env(db_session, username=username, password=password) is False
-    assert auth_service.is_setup_complete(db_session) is False
-
-
-def test_seed_from_env_does_not_override_the_database(db_session: Session) -> None:
-    """La base de datos manda: el entorno solo siembra una instalación vacía."""
+def test_credentials_cannot_be_created_twice(db_session: Session) -> None:
+    """La base de datos manda: no hay ninguna otra vía para crear o pisar la fila."""
     auth_service.create_initial_credentials(db_session, username="admin", password="supersecreta")
 
-    assert auth_service.seed_from_env(db_session, username="otro", password="otracontra") is False
+    with pytest.raises(auth_service.SetupAlreadyCompletedError):
+        auth_service.create_initial_credentials(
+            db_session, username="otro", password="otracontra"
+        )
     assert auth_service.verify_credentials(db_session, username="admin", password="supersecreta")

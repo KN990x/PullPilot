@@ -2,12 +2,6 @@ import os
 import tempfile
 
 os.environ["PULLPILOT_TESTING"] = "1"
-os.environ["AUTH_USER"] = ""
-os.environ["AUTH_PASS"] = ""
-# La mayoría de los tests no van de autenticación: con la escotilla abierta ejercitan los
-# endpoints sin arrastrar sesiones. Los que sí van de auth la cierran con `auth_client`.
-os.environ["ALLOW_NO_AUTH"] = "true"
-os.environ.setdefault("SESSION_SECRET", "pullpilot-test-session-secret")
 if "DATA_DIR" not in os.environ:
     os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="pullpilot_test_")
 
@@ -37,30 +31,26 @@ def _clean_auth_state():
         db.query(AuthCredential).delete()
         db.commit()
     auth_state.reset_for_tests()
-    auth_state.set_open_access(True)
     login_rate_limit._failed_attempts.clear()
 
 
 @pytest.fixture()
-def client() -> TestClient:
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture()
 def auth_client() -> TestClient:
-    """Cliente con la escotilla cerrada y sin credenciales: instalación pendiente."""
+    """Cliente sin credenciales creadas: la instalación está pendiente."""
     with TestClient(app) as c:
         # Después de entrar en el context manager: el lifespan llama a prime() y
         # sobrescribiría el estado si lo preparásemos antes.
         auth_state.reset_for_tests()
-        auth_state.set_open_access(False)
         yield c
 
 
 @pytest.fixture()
-def logged_in_client(auth_client: TestClient) -> TestClient:
-    """`auth_client` con el asistente completado y la sesión abierta."""
+def client(auth_client: TestClient) -> TestClient:
+    """Cliente con el asistente completado y la sesión abierta.
+
+    Es el cliente por defecto porque ya no existe ninguna escotilla que abra la API: la
+    única forma de llegar a un endpoint es con sesión, igual que en producción.
+    """
     response = auth_client.post(
         "/api/auth/setup",
         json={
@@ -71,6 +61,12 @@ def logged_in_client(auth_client: TestClient) -> TestClient:
     )
     assert response.status_code == 201, response.text
     return auth_client
+
+
+# Alias histórico: varios tests de autenticación piden explícitamente "el cliente logueado".
+@pytest.fixture()
+def logged_in_client(client: TestClient) -> TestClient:
+    return client
 
 
 @pytest.fixture()

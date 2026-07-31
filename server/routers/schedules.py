@@ -3,6 +3,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from server.database import get_db
+from server.locale.http import get_request_locale
+from server.locale.log_messages import t
 from server.models.db import ScheduledTask
 from server.models.schemas import ScheduleInput, ScheduledTaskOut
 from server.services.scheduler import build_trigger, refresh_scheduler_jobs
@@ -24,7 +26,11 @@ def get_schedules(db: Session = Depends(get_db)):
 
 
 @router.post("/schedules", response_model=ScheduledTaskOut)
-def create_schedule(data: ScheduleInput, db: Session = Depends(get_db)):
+def create_schedule(
+    data: ScheduleInput,
+    db: Session = Depends(get_db),
+    locale: str = Depends(get_request_locale),
+):
     expression = ""
     if data.task_type == "cron":
         if data.frequency == "daily":
@@ -53,22 +59,32 @@ def create_schedule(data: ScheduleInput, db: Session = Depends(get_db)):
         db.refresh(new_task)
     except SQLAlchemyError:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error al guardar la programacion") from None
+        raise HTTPException(
+            status_code=500, detail=t("http.schedule_save_failed", locale)
+        ) from None
 
     refresh_scheduler_jobs()
     return new_task
 
 
 @router.delete("/schedules/{schedule_id}")
-def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
+def delete_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    locale: str = Depends(get_request_locale),
+):
     task = db.query(ScheduledTask).filter(ScheduledTask.id == schedule_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Programacion no encontrada")
+        raise HTTPException(
+            status_code=404, detail=t("http.schedule_not_found", locale)
+        )
     db.delete(task)
     try:
         db.commit()
     except SQLAlchemyError:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Error al eliminar la programacion") from None
+        raise HTTPException(
+            status_code=500, detail=t("http.schedule_delete_failed", locale)
+        ) from None
     refresh_scheduler_jobs()
     return {"status": "ok"}

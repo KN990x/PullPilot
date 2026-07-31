@@ -31,7 +31,7 @@ export default function Dashboard({
           ) : (
             <RefreshCw size={20} />
           )}
-          {progress.is_running ? t("status.updating_btn") : t("status.update_all")}
+          {progress.is_running ? t("status.updating") : t("status.update_all")}
         </button>
       </div>
 

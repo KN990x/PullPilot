@@ -1,24 +1,23 @@
 import datetime
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from server import auth_state
 from server.config import (
-    AUTH_SEED_PASS,
-    AUTH_SEED_USER,
-    CORS_ORIGINS,
     DEFAULT_STACKS_ROOT,
-    PROJECTS_ROOT,
+    SESSION_COOKIE_NAME,
     SESSION_HTTPS_ONLY,
+    SESSION_MAX_AGE,
     SESSION_SAME_SITE,
     SESSION_SECRET,
+    STACKS_PATH,
     STATIC_DIR,
     logger,
     validate_startup_security,
@@ -61,28 +60,13 @@ AUTH_PUBLIC_PATH_EXTENSIONS = (
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # create_all va primero porque todo lo que sigue consulta la base de datos. En una
-    # instalación existente esto solo añade auth_credentials: create_all crea tablas
-    # nuevas pero no altera las que ya están.
+    # instalación existente esto solo añade tablas nuevas: no altera las que ya están.
     Base.metadata.create_all(bind=engine)
 
     with session_scope() as db:
-        seeded = auth_service.seed_from_env(
-            db, username=AUTH_SEED_USER, password=AUTH_SEED_PASS
-        )
         row = auth_service.get_credentials(db)
         configured = row is not None
         token_version = row.token_version if row else 0
-
-    if seeded:
-        logger.info(
-            "Credenciales creadas a partir de AUTH_USER/AUTH_PASS: no hace falta pasar "
-            "por el asistente de configuración."
-        )
-    elif AUTH_SEED_USER and AUTH_SEED_PASS:
-        logger.warning(
-            "AUTH_USER y AUTH_PASS siguen definidos en el entorno pero ya no se usan: "
-            "las credenciales viven hasheadas en la base de datos. Puedes borrarlas del .env."
-        )
 
     auth_state.prime(configured=configured, token_version=token_version)
     if not configured:
@@ -91,18 +75,14 @@ async def lifespan(_: FastAPI):
             "configuración inicial."
         )
 
-    # Después del estado real de la base de datos, porque ya no aborta el arranque: lo
-    # que emite son avisos, y varios dependen de lo anterior.
     validate_startup_security()
 
-    if not PROJECTS_ROOT.exists():
+    if not STACKS_PATH.exists():
         logger.warning(
-            "La carpeta de stacks no existe: %s. Por defecto el compose oficial usa "
-            "/srv/docker-stacks (${DOCKER_ROOT_PATH:-%s}); en .env puedes definir "
-            "DOCKER_ROOT_PATH u override avanzado PROJECTS_ROOT. Créala en el host y "
-            "revisa el bind mount en docker-compose; hasta entonces la lista de proyectos "
-            "estará vacía.",
-            PROJECTS_ROOT,
+            "La carpeta de stacks no existe: %s. Créala en el host (por defecto "
+            "%s) o define STACKS_PATH en el .env junto al docker-compose.yml. Hasta "
+            "entonces la lista de proyectos estará vacía.",
+            STACKS_PATH,
             DEFAULT_STACKS_ROOT,
         )
     start_scheduler()
@@ -113,8 +93,12 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="PullPilot API", lifespan=lifespan)
 
 # Middleware order (Starlette): the last one added via add_middleware receives the
-# request first. CORSMiddleware (outermost) → SessionMiddleware → routes and this
-# auth_middleware (http), so that request.session is available here.
+# request first. SessionMiddleware → routes and this auth_middleware (http), so that
+# request.session is available here.
+#
+# No hay CORSMiddleware a propósito: el backend sirve la propia SPA y en desarrollo Vite
+# hace de proxy, así que no existe ninguna petición cross-origin en un escenario
+# soportado. Lo que había antes permitía cualquier origen.
 
 
 def _is_api_path(path: str) -> bool:
@@ -142,10 +126,6 @@ def _requires_session(path: str) -> bool:
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     snapshot = auth_state.get_snapshot()
-
-    # Escotilla heredada: ALLOW_NO_AUTH deja pasar todo.
-    if snapshot.open_access:
-        return await call_next(request)
 
     path = request.url.path
     if _is_public_path(path):
@@ -199,17 +179,10 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
-    max_age=2592000,
-    session_cookie="pullpilot_session",
+    max_age=SESSION_MAX_AGE,
+    session_cookie=SESSION_COOKIE_NAME,
     same_site=SESSION_SAME_SITE,
     https_only=SESSION_HTTPS_ONLY,
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 app.include_router(auth_router)
@@ -218,16 +191,30 @@ app.include_router(projects_router)
 app.include_router(schedules_router)
 app.include_router(status_router)
 
-if STATIC_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
 
-    # Ojo: este handler intercepta también las HTTPException(404) de los routers, así que
-    # un 404 de la API acaba respondiendo 200 + el HTML de la SPA. Es un bug previo y
-    # queda fuera del alcance de este cambio; por eso ningún endpoint de /api/auth usa
-    # 404 para nada.
-    @app.exception_handler(404)
-    async def not_found_handler(_: Request, __):
-        return FileResponse(str(STATIC_DIR / "index.html"))
+def register_spa_fallback(target: FastAPI, static_dir: Path) -> None:
+    """Sirve el bundle de Vite y hace que las rutas de la SPA resuelvan al shell.
+
+    Está en una función y no suelto en el módulo para poder probarlo: en desarrollo
+    `server/static` no existe, así que el handler ni se registraba y el fallo de abajo
+    no lo veía ningún test.
+    """
+    target.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+
+    @target.exception_handler(404)
+    async def not_found_handler(request: Request, exc):
+        # Ojo: este handler recibe también las HTTPException(404) de los routers. Cuando
+        # devolvía el HTML de la SPA sin más, un `DELETE /api/schedules/9999` respondía
+        # 200 + index.html y el frontend daba el borrado por bueno. La API responde
+        # siempre JSON; el shell es solo para la navegación del navegador.
+        if _is_api_path(request.url.path) or request.method not in ("GET", "HEAD"):
+            detail = getattr(exc, "detail", "Not Found")
+            return JSONResponse(status_code=404, content={"detail": detail})
+        return FileResponse(str(static_dir / "index.html"))
+
+
+if STATIC_DIR.exists():
+    register_spa_fallback(app, STATIC_DIR)
 
 
 if __name__ == "__main__":

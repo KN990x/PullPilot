@@ -11,6 +11,7 @@ from server.database import SessionLocal
 from server.locale.log_messages import t
 from server.models.db import ProjectSettings, ScheduledTask
 from server.services.docker import run_command
+from server.services.locks import ProjectBusyError, project_update_slot
 from server.services.projects import compose_stack_allowed, update_single_project_logic
 from server.services.update_logs import persist_update_log
 
@@ -105,8 +106,17 @@ def global_update_job(locale: str | None = None) -> None:
                 time.sleep(2)
 
             try:
-                success, logs = update_single_project_logic(
-                    project.name, db, locale=loc
+                # Mismo turno que usa la API: si el usuario ya está actualizando ese
+                # stack a mano, la tarea global no se mete en medio.
+                with project_update_slot(project.name):
+                    success, logs = update_single_project_logic(
+                        project.name, db, locale=loc
+                    )
+            except ProjectBusyError:
+                success = False
+                logs = [t("scheduler.project_busy", loc, name=project.name)]
+                logger.warning(
+                    "Omitiendo %s: ya hay una actualizacion en curso.", project.name
                 )
             except Exception as exc:
                 success = False
@@ -181,7 +191,14 @@ def job_wrapper(target: str) -> None:
                 target,
             )
             return
-        success, logs = update_single_project_logic(target, db, locale=sloc)
+        try:
+            with project_update_slot(target):
+                success, logs = update_single_project_logic(target, db, locale=sloc)
+        except ProjectBusyError:
+            logger.warning(
+                "Omitiendo tarea programada %s: ya hay una actualizacion en curso.", target
+            )
+            return
 
         summary = (
             t("scheduler.scheduled_ok", sloc, target=target)

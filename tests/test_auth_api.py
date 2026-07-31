@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from server.app import app
-from server.config import LOGIN_RATE_LIMIT_MAX
+from server.login_rate_limit import MAX_ATTEMPTS
 from tests.conftest import SETUP_PASSWORD, SETUP_USERNAME
 
 SETUP_BODY = {
@@ -19,7 +19,6 @@ def test_status_is_public_before_setup(auth_client: TestClient) -> None:
     assert body == {
         "setup_complete": False,
         "authenticated": False,
-        "auth_enabled": True,
         "username": None,
     }
 
@@ -124,7 +123,7 @@ def test_login_before_setup(auth_client: TestClient) -> None:
 def test_login_rate_limit(logged_in_client: TestClient) -> None:
     logged_in_client.post("/api/auth/logout")
 
-    for _ in range(LOGIN_RATE_LIMIT_MAX):
+    for _ in range(MAX_ATTEMPTS):
         logged_in_client.post(
             "/api/auth/login", json={"username": SETUP_USERNAME, "password": "mala"}
         )

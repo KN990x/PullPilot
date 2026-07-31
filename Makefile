@@ -11,7 +11,7 @@ PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 # web/package.json, so `corepack pnpm` gives everyone the same pnpm.
 PNPM ?= corepack pnpm
 
-.PHONY: dev dev-open dev-server dev-server-open dev-web setup setup-web build up lint test
+.PHONY: dev dev-server dev-web setup setup-web build up lint test
 
 # Sets up the backend environment with the Python version from .python-version.
 setup:
@@ -30,11 +30,7 @@ setup-web:
 # el asistente de configuración se prueba igual que en producción; borra .devdata para
 # volver a verlo desde cero.
 dev-server:
-	DATA_DIR=.devdata uvicorn server.app:app --reload
-
-# Igual que dev-server pero con la autenticación desactivada, para trastear rápido.
-dev-server-open:
-	DATA_DIR=.devdata ALLOW_NO_AUTH=true uvicorn server.app:app --reload
+	DATA_DIR=.devdata $(PY) -m uvicorn server.app:app --reload
 
 dev-web:
 	cd web && $(PNPM) run dev
@@ -47,12 +43,6 @@ dev-web:
 # SIGINT por su cuenta y sobrevive al Ctrl+C de la terminal, dejando el 8000 ocupado.
 dev:
 	DATA_DIR=.devdata $(PY) -m uvicorn server.app:app --reload & \
-	API=$$!; trap "kill $$API 2>/dev/null" EXIT INT TERM; \
-	cd web && $(PNPM) run dev
-
-# Igual que dev pero saltándose el login, para entrar directo al panel.
-dev-open:
-	DATA_DIR=.devdata ALLOW_NO_AUTH=true $(PY) -m uvicorn server.app:app --reload & \
 	API=$$!; trap "kill $$API 2>/dev/null" EXIT INT TERM; \
 	cd web && $(PNPM) run dev
 

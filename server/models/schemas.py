@@ -64,7 +64,6 @@ class CredentialsInput(BaseModel):
 class AuthStatusOut(BaseModel):
     setup_complete: bool
     authenticated: bool
-    auth_enabled: bool
     username: str | None = None
 
 

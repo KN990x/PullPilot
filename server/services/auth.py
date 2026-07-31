@@ -1,8 +1,8 @@
 """Credenciales de acceso: hashing con scrypt (stdlib) y ciclo de vida de la fila única.
 
 Solo puede existir un juego de credenciales, por eso todo gira alrededor de la fila con
-id = AUTH_ROW_ID. El asistente de primera instalación la crea; a partir de ahí manda la
-base de datos y AUTH_USER/AUTH_PASS del entorno ya no pintan nada.
+id = AUTH_ROW_ID. La crea el asistente de primera instalación y a partir de ahí manda la
+base de datos: no hay ninguna variable de entorno que pueda cambiarlas.
 """
 
 from __future__ import annotations
@@ -260,33 +260,3 @@ def change_credentials(
         raise
     db.refresh(row)
     return row
-
-
-def seed_from_env(db: Session, *, username: str | None, password: str | None) -> bool:
-    """Migración de un solo tiro desde AUTH_USER/AUTH_PASS.
-
-    Crea la fila si el entorno trae credenciales válidas y la base de datos está vacía,
-    para que una instalación existente no se encuentre el asistente al actualizar.
-    Devuelve True solo si sembró.
-    """
-    if not username or not password:
-        return False
-    if is_setup_complete(db):
-        return False
-
-    try:
-        clean_user = validate_username(username)
-        validate_password(password)
-    except ValueError as exc:
-        logger.warning(
-            "AUTH_USER/AUTH_PASS del entorno no cumplen la política mínima (%s): se "
-            "ignoran y se mostrará el asistente de configuración.",
-            exc,
-        )
-        return False
-
-    try:
-        create_initial_credentials(db, username=clean_user, password=password)
-    except SetupAlreadyCompletedError:
-        return False
-    return True

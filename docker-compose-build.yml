@@ -3,7 +3,7 @@
 # Quick start: mkdir -p /srv/docker-stacks, then:
 #   docker compose -f docker-compose-build.yml up -d --build
 #
-# Optional .env next to this file overrides defaults (same variables as docker-compose.yml).
+# Same variables as docker-compose.yml, all optional.
 #
 services:
   pullpilot:
@@ -18,27 +18,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - pullpilot_data:/app/data
-      - ${DOCKER_ROOT_PATH:-/srv/docker-stacks}:${DOCKER_ROOT_PATH:-/srv/docker-stacks}
+      - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
     environment:
       TZ: ${TZ:-UTC}
-      DATA_DIR: ${DATA_DIR:-/app/data}
-      DOCKER_ROOT_PATH: ${DOCKER_ROOT_PATH:-/srv/docker-stacks}
-      PROJECTS_ROOT: ${PROJECTS_ROOT:-}
-      HEALTHCHECK_TIMEOUT: ${HEALTHCHECK_TIMEOUT:-60}
-      COMMAND_TIMEOUT: ${COMMAND_TIMEOUT:-300}
-      # Ver docker-compose.yml: las credenciales se crean por la interfaz en el primer
-      # arranque; estas tres variables son heredadas y opcionales.
-      ALLOW_NO_AUTH: ${ALLOW_NO_AUTH:-false}
-      AUTH_USER: ${AUTH_USER:-}
-      AUTH_PASS: ${AUTH_PASS:-}
-      SESSION_SECRET: ${SESSION_SECRET:-}
-      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
-      SESSION_SAME_SITE: ${SESSION_SAME_SITE:-lax}
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
-      LOGIN_RATE_LIMIT_ENABLED: ${LOGIN_RATE_LIMIT_ENABLED:-true}
-      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-15}
-      LOGIN_RATE_LIMIT_WINDOW_SEC: ${LOGIN_RATE_LIMIT_WINDOW_SEC:-300}
-      TRUST_X_FORWARDED_FOR: ${TRUST_X_FORWARDED_FOR:-false}
+      STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
+      PUBLIC_URL: ${PUBLIC_URL:-}
 
 volumes:
   pullpilot_data:

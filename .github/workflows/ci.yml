@@ -1,6 +1,9 @@
-# The repository's merge gate: mirrors `make lint` + `make test` and validates the image.
-# This is the check that was missing; without it no Dependabot PR had any signal to be
-# merged on.
+# The repository's only merge gate: one job, one check.
+#
+# Design note: the real verification happens locally with `make lint` and `make test`
+# before committing (see AGENTS.md). This workflow mirrors those two commands and adds
+# the one thing a development machine may not have: a Docker build plus a cold-start
+# smoke test. Splitting it into five jobs only produced five checks to read.
 name: CI
 
 on:
@@ -18,23 +21,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  python:
-    name: Python ${{ matrix.python-version }}
+  ci:
+    name: CI
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      # The matrix covers 3.11-3.13 on purpose; .python-version pins 3.11 for local
-      # development (parity with the python:3.11-slim image).
+      # 3.11 and nothing else: it is what .python-version pins and what the
+      # python:3.11-slim image ships. Testing versions the image never runs was noise.
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
           cache: pip
           cache-dependency-path: pyproject.toml
 
@@ -43,6 +42,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # The three steps below are exactly `make lint` (Python half) + `make test`.
       - name: Lint (ruff)
         run: ruff check server tests
 
@@ -52,18 +52,10 @@ jobs:
       - name: Tests
         run: python -m pytest tests/ -q
 
-  web:
-    name: Frontend
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-
       # No `version:`: pnpm/action-setup reads `packageManager` from web/package.json,
       # so CI, Docker and local development all use exactly the same pnpm.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
 
@@ -73,25 +65,17 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - name: Install
+      - name: Install frontend
         working-directory: web
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
+      - name: Lint frontend
         working-directory: web
         run: pnpm run lint
 
-      - name: Build
+      - name: Build frontend
         working-directory: web
         run: pnpm run build
-
-  docker:
-    name: Docker image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
 
       - uses: docker/setup-buildx-action@v4
 
@@ -141,7 +125,21 @@ jobs:
           code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/api/projects)
           [ "$code" = "200" ] || { echo "::error::/api/projects with session should be 200, got $code"; exit 1; }
 
-          echo "Cold start, setup wizard and authenticated request all OK"
+          # El fallback de la SPA no debe tragarse los 404 de la API (regresión conocida:
+          # devolvía index.html con status 200 y la UI daba el borrado por bueno).
+          code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+            -b /tmp/cookies.txt http://127.0.0.1:8000/api/schedules/99999)
+          [ "$code" = "404" ] || { echo "::error::/api/schedules/99999 should be 404, got $code"; exit 1; }
+
+          # …pero una ruta de navegación sí tiene que recibir el shell de la SPA.
+          code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/history)
+          [ "$code" = "200" ] || { echo "::error::/history should serve the SPA shell, got $code"; exit 1; }
+
+          # docker compose tiene que existir dentro de la imagen: es lo que ejecuta cada
+          # actualización, y ahora viene del CLI oficial y no del paquete docker.io.
+          docker exec pullpilot-ci docker compose version
+
+          echo "Cold start, setup wizard, authenticated request and 404 handling all OK"
 
       - name: Cleanup
         if: always()

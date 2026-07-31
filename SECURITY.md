@@ -43,11 +43,13 @@ In scope:
 
 Out of scope:
 
-- running with `ALLOW_NO_AUTH=true`, which disables authentication by design and is
-  documented as "trusted networks only",
 - exposing the UI to the internet without a reverse proxy, TLS, and credentials,
 - the inherent privilege of the mounted Docker socket,
 - vulnerabilities in the container images that PullPilot updates on your behalf.
+
+There is no longer any way to disable authentication. The `ALLOW_NO_AUTH` escape hatch is
+gone: with a setup wizard that takes ten seconds, an "open the whole API" switch was a
+liability with no remaining purpose.
 
 ## The setup window
 
@@ -62,23 +64,31 @@ the window is closed for good.
 
 ## Hardening checklist
 
-- Complete the setup wizard right after the first start; leave `ALLOW_NO_AUTH` at `false`.
-- `SESSION_SECRET` is optional: it is generated and persisted at
-  `$DATA_DIR/session_secret.key` with mode `0600`. Anyone who can read that file can forge
-  sessions, so keep the data volume as private as the database itself.
-- The session cookie is **signed, not encrypted**, lasts 30 days and — with
-  `SESSION_HTTPS_ONLY=false` — travels in the clear. It is the only factor guarding
-  something that controls the Docker socket.
-- Behind HTTPS, set `SESSION_HTTPS_ONLY=true`; set `TRUST_X_FORWARDED_FOR=true` only when
-  a trusted reverse proxy sits in front, so login rate limiting sees real client IPs.
-- Restrict `CORS_ORIGINS` instead of leaving it empty (empty means "any origin").
+The list is short on purpose: most of what used to be here was a knob you could set
+wrongly, and each one is now either automatic or a fixed value.
+
+- Complete the setup wizard right after the first start.
+- The session signing secret is generated and persisted inside the data volume, at
+  `session_secret.key` with mode `0600`. Anyone who can read that file can forge sessions,
+  so keep the volume as private as the database itself.
+- The session cookie is **signed, not encrypted** and lasts 30 days. Over plain HTTP it
+  travels in the clear, and it is the only factor guarding something that controls the
+  Docker socket.
+- Behind a TLS-terminating reverse proxy, set `PUBLIC_URL=https://your.host`. That single
+  value marks the cookie `Secure` and makes login rate limiting read `X-Forwarded-For`, so
+  it sees real client IPs instead of the proxy's.
+- `SameSite=lax` on the cookie, no CORS middleware at all, login rate limiting at 15
+  attempts per 5 minutes: fixed, not configurable, so no deployment can weaken them.
 - Do not publish the port to the internet directly; keep it on the LAN or behind a proxy.
 
 ## Automated security tooling
 
-This repository runs CodeQL (default setup), Dependabot alerts and grouped security
-updates, secret scanning with push protection, `pip-audit` for Python, and `pnpm audit`
-for the frontend. See [`.github/workflows/`](.github/workflows/).
+This repository runs Dependabot alerts and grouped security updates, secret scanning with
+push protection, `pip-audit` for Python, and `pnpm audit` for the frontend. The audits run
+weekly (and on demand) from [`security-audit.yml`](.github/workflows/security-audit.yml):
+they are an alarm, not a merge gate, so they no longer decorate every pull request with a
+check nobody can clear. The merge gate is [`ci.yml`](.github/workflows/ci.yml), which runs
+lint, tests, the frontend build and a cold-start smoke test of the image.
 
 The frontend additionally relies on two pnpm guarantees, configured in
 [`web/pnpm-workspace.yaml`](web/pnpm-workspace.yaml): dependency install scripts are

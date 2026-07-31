@@ -8,29 +8,15 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - pullpilot_data:/app/data
-      - ${DOCKER_ROOT_PATH:-/srv/docker-stacks}:${DOCKER_ROOT_PATH:-/srv/docker-stacks}
+      # Misma ruta en el host y dentro del contenedor: es lo que permite que los
+      # `docker compose` que lanza PullPilot encuentren los stacks donde el host los tiene.
+      # DOCKER_ROOT_PATH es el nombre antiguo y se sigue aceptando.
+      - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
     environment:
       TZ: ${TZ:-UTC}
-      DATA_DIR: ${DATA_DIR:-/app/data}
-      DOCKER_ROOT_PATH: ${DOCKER_ROOT_PATH:-/srv/docker-stacks}
-      PROJECTS_ROOT: ${PROJECTS_ROOT:-}
-      HEALTHCHECK_TIMEOUT: ${HEALTHCHECK_TIMEOUT:-60}
-      COMMAND_TIMEOUT: ${COMMAND_TIMEOUT:-300}
-      # PullPilot pide usuario y contraseña por la interfaz en el primer arranque y los
-      # guarda hasheados en /app/data. Las tres variables de abajo son heredadas y
-      # opcionales: AUTH_USER/AUTH_PASS solo siembran una instalación vacía, y
-      # SESSION_SECRET se genera y persiste solo si no se define.
-      ALLOW_NO_AUTH: ${ALLOW_NO_AUTH:-false}
-      AUTH_USER: ${AUTH_USER:-}
-      AUTH_PASS: ${AUTH_PASS:-}
-      SESSION_SECRET: ${SESSION_SECRET:-}
-      SESSION_HTTPS_ONLY: ${SESSION_HTTPS_ONLY:-false}
-      SESSION_SAME_SITE: ${SESSION_SAME_SITE:-lax}
-      CORS_ORIGINS: ${CORS_ORIGINS:-}
-      LOGIN_RATE_LIMIT_ENABLED: ${LOGIN_RATE_LIMIT_ENABLED:-true}
-      LOGIN_RATE_LIMIT_MAX: ${LOGIN_RATE_LIMIT_MAX:-15}
-      LOGIN_RATE_LIMIT_WINDOW_SEC: ${LOGIN_RATE_LIMIT_WINDOW_SEC:-300}
-      TRUST_X_FORWARDED_FOR: ${TRUST_X_FORWARDED_FOR:-false}
+      STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
+      # Solo si hay un proxy inverso delante, p. ej. https://pullpilot.example.com
+      PUBLIC_URL: ${PUBLIC_URL:-}
 
 volumes:
   pullpilot_data:

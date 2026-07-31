@@ -70,7 +70,6 @@ def _open_session(request: Request, row: AuthCredential) -> None:
 @router.get("/status", response_model=AuthStatusOut)
 def auth_status(request: Request, db: Session = Depends(get_db)):
     """Bootstrap de la SPA: público y siempre 200, también sin configurar."""
-    open_access = auth_state.get_snapshot().open_access
     row = auth_service.get_credentials(db)
 
     session_valid = bool(
@@ -80,24 +79,15 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
     )
     return AuthStatusOut(
         setup_complete=row is not None,
-        # Con la escotilla abierta la SPA entra directa al panel.
-        authenticated=open_access or session_valid,
-        auth_enabled=not open_access,
-        # El nombre de usuario solo se devuelve con una sesión real detrás: nunca a un
-        # anónimo, tampoco cuando ALLOW_NO_AUTH deja la API abierta.
+        authenticated=session_valid,
+        # El nombre de usuario solo se devuelve con una sesión real detrás, nunca a un
+        # anónimo.
         username=row.username if (session_valid and row is not None) else None,
     )
 
 
 @router.post("/setup", status_code=status.HTTP_201_CREATED, response_model=AuthResultOut)
 def setup(request: Request, body: SetupInput, db: Session = Depends(get_db)):
-    if auth_state.get_snapshot().open_access:
-        return _error(
-            status.HTTP_409_CONFLICT,
-            "La autenticación está desactivada (ALLOW_NO_AUTH).",
-            "setup_disabled",
-        )
-
     ip = _client_ip(request)
     if is_login_rate_limited(ip):
         return _rate_limited(ip)

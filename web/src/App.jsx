@@ -9,6 +9,7 @@ import Header from "./components/Header";
 import HistoryView from "./components/HistoryView";
 import LoginView from "./components/LoginView";
 import LogModal from "./components/LogModal";
+import OfflineView from "./components/OfflineView";
 import ProgressBar from "./components/ProgressBar";
 import ScheduleView from "./components/ScheduleView";
 import SetupView from "./components/SetupView";
@@ -40,6 +41,13 @@ const DEFAULT_PROGRESS = {
   total: 0,
   current_project: "",
 };
+
+// El modo demo es una herramienta de desarrollo: permite ver la interfaz sin levantar el
+// backend. En la build publicada estaba activo y saltaba ante CUALQUIER fallo de red, así
+// que mientras PullPilot recreaba su propio contenedor el usuario veía un panel lleno de
+// proyectos inventados. Vite evalúa esto en tiempo de compilación y elimina del bundle de
+// producción todo lo que cuelga de la condición, mockData.js incluido.
+const MOCK_MODE_ALLOWED = import.meta.env.DEV;
 
 /** Traduce el `code` estable del backend a una clave de i18n. */
 const ERROR_KEYS = {
@@ -119,9 +127,15 @@ export default function App() {
         return;
       }
       if (isBackendUnreachableError(error)) {
-        console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
-        setProjects(MOCK_PROJECTS);
-        setIsMockMode(true);
+        if (MOCK_MODE_ALLOWED) {
+          console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
+          setProjects(MOCK_PROJECTS);
+          setIsMockMode(true);
+          return;
+        }
+        // Se está actualizando o se ha caído: la pantalla de "sin conexión" con reintento
+        // es honesta; datos falsos, no.
+        setAuthState("offline");
         return;
       }
       console.error("Error cargando proyectos", error);
@@ -141,8 +155,12 @@ export default function App() {
         if (error.message === SESSION_EXPIRED_ERROR) {
           return;
         }
-        if (allowMockFallback && isBackendUnreachableError(error)) {
+        if (MOCK_MODE_ALLOWED && allowMockFallback && isBackendUnreachableError(error)) {
           setHistory(MOCK_HISTORY);
+          return;
+        }
+        if (isBackendUnreachableError(error)) {
+          setAuthState("offline");
           return;
         }
         console.error("Error cargando historial", error);
@@ -192,22 +210,20 @@ export default function App() {
     try {
       const status = await fetchAuthStatus({ locale: normalizeUiLocale(i18n.language) });
       setAuthUsername(status.username ?? null);
-      if (!status.auth_enabled) {
-        setAuthState("ready");
-        return;
-      }
       if (!status.setup_complete) {
         setAuthState("setup");
         return;
       }
       setAuthState(status.authenticated ? "ready" : "login");
     } catch (error) {
-      // Mismo criterio que loadProjects: sin backend detrás se entra en modo demo. Un
-      // login sobre un backend que no existe no le sirve a nadie.
       if (isBackendUnreachableError(error)) {
-        console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
-        setIsMockMode(true);
-        setAuthState("ready");
+        if (MOCK_MODE_ALLOWED) {
+          console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
+          setIsMockMode(true);
+          setAuthState("ready");
+          return;
+        }
+        setAuthState("offline");
         return;
       }
       console.error("Error consultando el estado de autenticación", error);
@@ -217,6 +233,11 @@ export default function App() {
     // el bootstrap al cambiar de idioma.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleRetryConnection = useCallback(async () => {
+    setAuthState("loading");
+    await bootstrap();
+  }, [bootstrap]);
 
   useEffect(() => {
     bootstrap();
@@ -366,7 +387,9 @@ export default function App() {
         await updateProject(name, requestContext);
         await loadProjects();
       } catch (error) {
-        if (error.message !== SESSION_EXPIRED_ERROR) {
+        if (error?.status === 409) {
+          alert(t("alerts.update_in_progress"));
+        } else if (error.message !== SESSION_EXPIRED_ERROR) {
           alert(t("alerts.backend_error"));
         }
       }
@@ -559,6 +582,17 @@ export default function App() {
 
   if (authState === "loading") {
     return <AuthLayout t={t} i18n={i18n} onToggleLanguage={toggleLanguage} loading />;
+  }
+
+  if (authState === "offline") {
+    return (
+      <OfflineView
+        t={t}
+        i18n={i18n}
+        onToggleLanguage={toggleLanguage}
+        onRetry={handleRetryConnection}
+      />
+    );
   }
 
   if (authState === "setup") {

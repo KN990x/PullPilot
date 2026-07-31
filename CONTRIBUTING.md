@@ -36,17 +36,18 @@ The project has no Python lockfile: the exact versions of the direct dependencie
 with `==` in `pyproject.toml`, and CI audits the fully resolved tree with `pip-audit`.
 Install with `pip`; do not add a `uv.lock` unless the Docker build is migrated to `uv` as well.
 
-Relevant environment variables (adjust paths for your machine):
+Environment variables (all optional):
 
 | Variable | Description |
 |----------|-------------|
-| `DOCKER_ROOT_PATH` | In Docker Compose installs, the stacks root on host and container (same absolute path as the bind mount). Optional in `.env`: the official compose defaults to `/srv/docker-stacks`. |
-| `PROJECTS_ROOT` | Advanced override: directory inside the container whose subfolders contain `docker-compose.yml` (defaults from `DOCKER_ROOT_PATH` or `/srv/docker-stacks`). |
-| `DATA_DIR` | SQLite and runtime data (container default: `/app/data`). Locally, often a folder in the repo such as `./data`. |
-| `AUTH_USER` / `AUTH_PASS` | Optional UI credentials. |
-| `SESSION_SECRET` | Session cookie signing key; set a fixed value in dev so sessions survive restarts. |
-| `HEALTHCHECK_TIMEOUT` | Post-deploy health check timeout (seconds). |
-| `COMMAND_TIMEOUT` | External command timeout (seconds). |
+| `STACKS_PATH` | Stacks root: a directory whose subfolders each contain a `docker-compose.yml`. Defaults to `/srv/docker-stacks`. `DOCKER_ROOT_PATH` and `PROJECTS_ROOT` are still read as aliases so old `.env` files keep working. |
+| `DATA_DIR` | SQLite and the session secret. Not documented for end users — the container fixes it to `/app/data` and `make dev-server` points it at `.devdata`. |
+
+That is the whole list on the backend side. Credentials are created through the setup
+wizard and live hashed in the database; the session secret generates itself; the cookie
+settings, the command timeouts and the login rate limit are constants. If you are about to
+add a new environment variable, that is a design decision worth arguing for in the PR —
+the point of the current shape is that a user never has to read a table of knobs.
 
 Run with auto-reload:
 
@@ -54,7 +55,9 @@ Run with auto-reload:
 make dev-server
 ```
 
-Equivalent to `uvicorn server.app:app --reload`.
+`DATA_DIR=.devdata` is set for you: outside the container the default `/app/data` cannot be
+created and the import of `server/config.py` would fail. Delete `.devdata` to see the setup
+wizard from scratch.
 
 ### Frontend
 
@@ -129,7 +132,9 @@ The default `IMAGE_NAME` targets the GHCR-published image; override if needed: `
 
 1. Branch from `main` with a descriptive name.
 2. Use clear commit messages.
-3. Run `make lint` before opening the PR if you changed Python or the frontend.
+3. **Run `make lint` and `make test` before opening the PR.** There is a single CI check
+   and it mirrors exactly those two commands plus a Docker build and a cold-start smoke
+   test. Getting it green in CI and not locally means a slower loop, not a safer one.
 4. In the PR, explain **what** changed and **why**; link related issues when applicable.
 5. Docker or Compose changes should be reviewed together with `Dockerfile`, `.dockerignore`, or `docker-compose.yml` when relevant.
 
