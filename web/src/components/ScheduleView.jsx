@@ -170,6 +170,9 @@ export default function ScheduleView({
                   className="bg-transparent w-full text-center text-sm font-medium focus:outline-none text-slate-700 placeholder-slate-300"
                 />
               </div>
+              {/* Cron runs on the container clock (TZ), not the browser's. One-off tasks
+                  carry the browser offset, so only this one needs saying. */}
+              <span className="text-xs text-slate-400">{t("schedule.time_hint")}</span>
             </div>
           )}
 

@@ -13,6 +13,7 @@ from server import auth_state
 from server.config import TRUST_X_FORWARDED_FOR
 from server.database import get_db
 from server.login_rate_limit import (
+    ClientIdentity,
     clear_login_failures,
     is_login_rate_limited,
     record_login_failure,
@@ -34,22 +35,28 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 legacy_router = APIRouter(tags=["auth"])
 
 
-def _client_ip(request: Request) -> str:
+def _client_identity(request: Request) -> ClientIdentity:
+    """The IP we act on plus the socket it really came from.
+
+    `X-Forwarded-For` is sent by the client, so on its own it is a way to get a fresh
+    rate-limit bucket per request. The peer is kept alongside it as the identity nobody
+    can forge; see server/login_rate_limit.py.
+    """
+    peer = request.client.host if request.client else "unknown"
+    reported = peer
     if TRUST_X_FORWARDED_FOR:
         xff = request.headers.get("x-forwarded-for")
         if xff:
-            return xff.split(",")[0].strip() or "unknown"
-    if request.client:
-        return request.client.host
-    return "unknown"
+            reported = xff.split(",")[0].strip() or peer
+    return ClientIdentity(reported_ip=reported, peer_ip=peer)
 
 
 def _error(status_code: int, detail: str, code: str, **extra) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"detail": detail, "code": code, **extra})
 
 
-def _rate_limited(ip: str) -> JSONResponse:
-    retry_after = seconds_until_reset(ip)
+def _rate_limited(who: ClientIdentity) -> JSONResponse:
+    retry_after = seconds_until_reset(who)
     response = _error(
         status.HTTP_429_TOO_MANY_REQUESTS,
         "Demasiados intentos. Inténtalo más tarde.",
@@ -87,9 +94,9 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/setup", status_code=status.HTTP_201_CREATED, response_model=AuthResultOut)
 def setup(request: Request, body: SetupInput, db: Session = Depends(get_db)):
-    ip = _client_ip(request)
-    if is_login_rate_limited(ip):
-        return _rate_limited(ip)
+    who = _client_identity(request)
+    if is_login_rate_limited(who):
+        return _rate_limited(who)
 
     # Checked before hashing: otherwise this endpoint stays a 16 MiB, 200 ms amplifier
     # long after the install is done.
@@ -111,20 +118,20 @@ def setup(request: Request, body: SetupInput, db: Session = Depends(get_db)):
             "setup_already_completed",
         )
     except ValueError as exc:
-        record_login_failure(ip)
+        record_login_failure(who)
         return _error(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc), "validation_error")
 
     auth_state.mark_configured(token_version=row.token_version)
-    clear_login_failures(ip)
+    clear_login_failures(who)
     _open_session(request, row)
     return AuthResultOut(username=row.username)
 
 
 @router.post("/login", response_model=AuthResultOut)
 def login(request: Request, body: LoginInput, db: Session = Depends(get_db)):
-    ip = _client_ip(request)
-    if is_login_rate_limited(ip):
-        return _rate_limited(ip)
+    who = _client_identity(request)
+    if is_login_rate_limited(who):
+        return _rate_limited(who)
 
     row = auth_service.get_credentials(db)
     if row is None:
@@ -135,7 +142,7 @@ def login(request: Request, body: LoginInput, db: Session = Depends(get_db)):
         )
 
     if not auth_service.verify_credentials(db, username=body.username, password=body.password):
-        record_login_failure(ip)
+        record_login_failure(who)
         # Generic message: never distinguish "no such user" from "wrong password".
         return _error(
             status.HTTP_401_UNAUTHORIZED,
@@ -143,7 +150,7 @@ def login(request: Request, body: LoginInput, db: Session = Depends(get_db)):
             "invalid_credentials",
         )
 
-    clear_login_failures(ip)
+    clear_login_failures(who)
     _open_session(request, row)
     return AuthResultOut(username=row.username)
 
@@ -157,9 +164,9 @@ def logout(request: Request):
 
 @router.post("/credentials", response_model=AuthResultOut)
 def change_credentials(request: Request, body: CredentialsInput, db: Session = Depends(get_db)):
-    ip = _client_ip(request)
-    if is_login_rate_limited(ip):
-        return _rate_limited(ip)
+    who = _client_identity(request)
+    if is_login_rate_limited(who):
+        return _rate_limited(who)
 
     try:
         row = auth_service.change_credentials(
@@ -177,7 +184,7 @@ def change_credentials(request: Request, body: CredentialsInput, db: Session = D
     except auth_service.InvalidCredentialsError:
         # Same attempt budget as login: guessing current_password is guessing a
         # password, and a separate quota would hand out twice the attempts.
-        record_login_failure(ip)
+        record_login_failure(who)
         return _error(
             status.HTTP_401_UNAUTHORIZED,
             "La contraseña actual no es correcta",
@@ -187,7 +194,7 @@ def change_credentials(request: Request, body: CredentialsInput, db: Session = D
         return _error(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc), "validation_error")
 
     auth_state.bump_token_version(row.token_version)
-    clear_login_failures(ip)
+    clear_login_failures(who)
     # Our own session is reissued on the new version; every other one is invalidated.
     _open_session(request, row)
     return AuthResultOut(username=row.username)

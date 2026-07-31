@@ -1,4 +1,3 @@
-import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -55,6 +54,21 @@ AUTH_PUBLIC_PATH_EXTENSIONS = (
     ".json",
     ".webmanifest",
 )
+
+
+# index.html is the file that names every hashed asset, so a cached copy can outlive the
+# assets it points at. The hashed files themselves keep StaticFiles' own caching.
+NO_CACHE = "no-cache"
+
+
+class _SpaStatics(StaticFiles):
+    """StaticFiles that refuses to let the SPA shell be cached."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        if str(full_path).endswith("index.html"):
+            response.headers["Cache-Control"] = NO_CACHE
+        return response
 
 
 @asynccontextmanager
@@ -150,9 +164,6 @@ async def auth_middleware(request: Request, call_next):
         # No redirect to /login: the SPA decides what to draw from /api/auth/status.
         return await call_next(request)
 
-    request.session["user"] = user
-    request.session["v"] = version
-    request.session["last_seen"] = int(datetime.datetime.now(datetime.UTC).timestamp())
     return await call_next(request)
 
 
@@ -186,23 +197,41 @@ app.include_router(schedules_router)
 app.include_router(status_router)
 
 
+def _is_asset_request(path: str) -> bool:
+    """A request for a concrete file rather than a route the SPA can draw.
+
+    Everything Vite emits carries a content hash in its name. After a redeploy the old
+    names are gone, and answering those with the shell meant a stale tab received HTML
+    with status 200 where it expected JavaScript: a blank page instead of a clean 404 the
+    browser knows how to report.
+    """
+    return path.startswith("/assets/") or "." in path.rsplit("/", 1)[-1]
+
+
 def register_spa_fallback(target: FastAPI, static_dir: Path) -> None:
     """Serve the Vite bundle and resolve SPA routes to its shell.
 
     A function so it can be tested: `server/static` only exists inside the image, so
     outside it the handler is never registered and no ordinary test reaches it.
     """
-    target.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+    target.mount("/", _SpaStatics(directory=str(static_dir), html=True), name="static")
 
     @target.exception_handler(404)
     async def not_found_handler(request: Request, exc):
         # This also catches HTTPException(404) from the routers. Returning the SPA shell
         # for those answered `DELETE /api/schedules/9999` with 200 + index.html, and the
         # frontend took the delete as done. The API always answers JSON.
-        if _is_api_path(request.url.path) or request.method not in ("GET", "HEAD"):
+        path = request.url.path
+        if (
+            _is_api_path(path)
+            or request.method not in ("GET", "HEAD")
+            or _is_asset_request(path)
+        ):
             detail = getattr(exc, "detail", "Not Found")
             return JSONResponse(status_code=404, content={"detail": detail})
-        return FileResponse(str(static_dir / "index.html"))
+        return FileResponse(
+            str(static_dir / "index.html"), headers={"Cache-Control": NO_CACHE}
+        )
 
 
 if STATIC_DIR.exists():

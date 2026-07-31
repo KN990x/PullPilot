@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import AccountModal from "./components/AccountModal";
@@ -48,6 +48,28 @@ const DEFAULT_PROGRESS = {
 // it, mockData.js included, from the production bundle.
 const MOCK_MODE_ALLOWED = import.meta.env.DEV;
 
+/**
+ * Pin the browser's UTC offset onto a `datetime-local` value.
+ *
+ * That input yields a bare wall-clock ("2026-08-01T03:00") with no zone, and the
+ * scheduler read it in the *container's* timezone: pick 03:00 from a laptop two hours
+ * ahead of the server and the task fired at 05:00. The offset makes both agree.
+ */
+function withLocalOffset(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  const withSeconds = value.split(":").length === 2 ? `${value}:00` : value;
+  // getTimezoneOffset() counts minutes *behind* UTC, so the sign is inverted.
+  const minutes = -parsed.getTimezoneOffset();
+  const sign = minutes >= 0 ? "+" : "-";
+  const absolute = Math.abs(minutes);
+  const hh = String(Math.floor(absolute / 60)).padStart(2, "0");
+  const mm = String(absolute % 60).padStart(2, "0");
+  return `${withSeconds}${sign}${hh}:${mm}`;
+}
+
 /** Maps the backend's stable `code` to an i18n key. */
 const ERROR_KEYS = {
   invalid_credentials: "auth.invalid_credentials",
@@ -89,6 +111,7 @@ export default function App() {
   const [authUsername, setAuthUsername] = useState(null);
   const [authError, setAuthError] = useState(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [retryingConnection, setRetryingConnection] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountError, setAccountError] = useState(null);
   const [accountSuccess, setAccountSuccess] = useState(false);
@@ -185,15 +208,27 @@ export default function App() {
     }
   }, [isMockMode, requestContext]);
 
+  // Whether a global update was running last time we asked. Refreshing on every "not
+  // running" answer meant the very first check, right after the mount had already
+  // loaded everything, re-ran both loads: two full project scans (each up to eight
+  // `compose ps` subprocesses) and two /history calls on every entry to the dashboard.
+  const wasUpdatingRef = useRef(false);
+
   const checkProgress = useCallback(async () => {
     try {
       const data = await fetchUpdateStatus(requestContext);
       if (data.is_running) {
+        wasUpdatingRef.current = true;
         setProgress(data);
         startPolling(checkProgress, 1000);
-      } else {
-        stopPolling();
-        setProgress(DEFAULT_PROGRESS);
+        return;
+      }
+
+      stopPolling();
+      setProgress(DEFAULT_PROGRESS);
+      // Only on the running -> finished edge: that is when the data actually changed.
+      if (wasUpdatingRef.current) {
+        wasUpdatingRef.current = false;
         await loadProjects();
         await loadHistory(false);
       }
@@ -231,9 +266,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Stay on the offline card and spin its own button instead of flipping the whole
+  // screen to the generic loader, which hid the retry the user just asked for.
   const handleRetryConnection = useCallback(async () => {
-    setAuthState("loading");
-    await bootstrap();
+    setRetryingConnection(true);
+    try {
+      await bootstrap();
+    } finally {
+      setRetryingConnection(false);
+    }
   }, [bootstrap]);
 
   useEffect(() => {
@@ -410,6 +451,9 @@ export default function App() {
 
     try {
       await triggerUpdateAll(requestContext);
+      // Marked here too, not only when a poll sees it running: a very short global
+      // update could finish between this call and the first poll one second later.
+      wasUpdatingRef.current = true;
       setProgress({
         is_running: true,
         current: 0,
@@ -442,7 +486,7 @@ export default function App() {
         target,
         task_type: "date",
         frequency: "daily",
-        date_iso: dateIso,
+        date_iso: withLocalOffset(String(dateIso)),
       };
     } else {
       const hour = Number.parseInt(formData.get("hour"), 10);
@@ -496,7 +540,7 @@ export default function App() {
     }
   };
 
-  const toggleSetting = async (name, setting) => {
+  const flipSetting = (name, setting) =>
     setProjects((prev) =>
       prev.map((project) => {
         if (project.name !== name) {
@@ -512,28 +556,19 @@ export default function App() {
       })
     );
 
+  const toggleSetting = async (name, setting) => {
+    flipSetting(name, setting);
+
     if (isMockMode) {
       return;
     }
 
     try {
+      // No reload afterwards: the optimistic flip already matches what the endpoint
+      // stored, and re-scanning ran a `compose ps` per project to confirm one boolean.
       await toggleProjectSetting(name, setting, requestContext);
-      await loadProjects();
     } catch (error) {
-      setProjects((prev) =>
-        prev.map((project) => {
-          if (project.name !== name) {
-            return project;
-          }
-          if (setting === "exclude") {
-            return { ...project, excluded: !project.excluded };
-          }
-          if (setting === "fullstop") {
-            return { ...project, full_stop: !project.full_stop };
-          }
-          return project;
-        })
-      );
+      flipSetting(name, setting);
       if (error.message !== SESSION_EXPIRED_ERROR) {
         alert(t("alerts.config_error"));
       }
@@ -553,7 +588,11 @@ export default function App() {
     }
 
     if (taskType === "date") {
-      return t("schedule.format.once", { at: expression });
+      // Rendered in the reader's timezone. Rows created before the offset was pinned
+      // carry none, so they still read as whatever clock the container was on.
+      const parsed = new Date(expression.replace(" ", "T"));
+      const at = Number.isNaN(parsed.getTime()) ? expression : parsed.toLocaleString();
+      return t("schedule.format.once", { at });
     }
 
     const parts = expression.split(" ");
@@ -586,6 +625,7 @@ export default function App() {
         i18n={i18n}
         onToggleLanguage={toggleLanguage}
         onRetry={handleRetryConnection}
+        retrying={retryingConnection}
       />
     );
   }

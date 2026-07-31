@@ -5,6 +5,7 @@ from threading import Lock
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from sqlalchemy.exc import SQLAlchemyError
 
 from server.config import LOG_LOCALE, logger
 from server.database import SessionLocal
@@ -47,15 +48,21 @@ def snapshot_global_update_status() -> dict[str, object]:
 global_update_lock = Lock()
 
 
-def build_trigger(task_type: str, expression: str) -> CronTrigger | DateTrigger:
-    """Build an APScheduler trigger. ValueError if the expression is not valid."""
+def build_trigger(
+    task_type: str, expression: str, *, locale: str = "es"
+) -> CronTrigger | DateTrigger:
+    """Build an APScheduler trigger. ValueError if the expression is not valid.
+
+    Translated because the router hands these straight to the user as a 422 `detail`:
+    they were the only messages in the schedules flow that skipped i18n.
+    """
     expr = (expression or "").strip()
     if task_type == "cron":
         if not expr:
-            raise ValueError("La expresion cron esta vacia")
+            raise ValueError(t("schedule.cron_empty", locale))
         parts = expr.split()
         if len(parts) < 5:
-            raise ValueError("La expresion cron debe tener 5 campos")
+            raise ValueError(t("schedule.cron_fields", locale))
         try:
             return CronTrigger(
                 minute=parts[0],
@@ -65,15 +72,15 @@ def build_trigger(task_type: str, expression: str) -> CronTrigger | DateTrigger:
                 day_of_week=parts[4],
             )
         except Exception as exc:
-            raise ValueError(f"Cron invalido: {exc}") from exc
+            raise ValueError(t("schedule.cron_invalid", locale, exc=exc)) from exc
     if task_type == "date":
         if not expr:
-            raise ValueError("La fecha programada esta vacia")
+            raise ValueError(t("schedule.date_empty", locale))
         try:
             return DateTrigger(run_date=expr)
         except Exception as exc:
-            raise ValueError(f"Fecha invalida: {exc}") from exc
-    raise ValueError(f"Tipo de tarea no soportado: {task_type}")
+            raise ValueError(t("schedule.date_invalid", locale, exc=exc)) from exc
+    raise ValueError(t("schedule.unsupported_type", locale, task_type=task_type))
 
 
 def global_update_job(locale: str | None = None) -> None:
@@ -83,11 +90,15 @@ def global_update_job(locale: str | None = None) -> None:
         logger.warning("Actualizacion global ya en curso. Omitiendo tarea.")
         return
 
-    global_update_status["is_running"] = True
-    global_update_status["processed"] = []
-    db = SessionLocal()
+    # Inside the try, so the finally always turns it back off. Set before it, a failure
+    # opening the session left the flag and the lock taken and the progress bar spinning
+    # for the rest of the process's life.
+    db = None
     try:
-        logger.info("Iniciando tarea programada: Actualizacion Global Segura")
+        global_update_status["is_running"] = True
+        global_update_status["processed"] = []
+        db = SessionLocal()
+        logger.info("Iniciando tarea programada: Actualización Global Segura")
 
         rows = db.query(ProjectSettings).filter(ProjectSettings.excluded.is_(False)).all()
         projects = [p for p in rows if compose_stack_allowed(Path(p.path))]
@@ -168,13 +179,45 @@ def global_update_job(locale: str | None = None) -> None:
             details=global_logs,
         )
     finally:
-        db.close()
+        if db is not None:
+            db.close()
         global_update_status["is_running"] = False
         global_update_status["current_project"] = ""
         global_update_lock.release()
 
 
-def job_wrapper(target: str) -> None:
+def retire_one_shot_task(task_id: int) -> None:
+    """Mark a fired `date` task inactive.
+
+    APScheduler drops the job once its date has passed, but the row stayed active: the UI
+    listed it forever as if it were still going to run, and every refresh re-registered it
+    with a date in the past just to log a misfire.
+    """
+    db = SessionLocal()
+    try:
+        task = db.get(ScheduledTask, task_id)
+        if task is None or not task.active:
+            return
+        task.active = False
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.warning("No se pudo desactivar la tarea de un solo uso %s.", task_id)
+    finally:
+        db.close()
+
+
+def job_wrapper(target: str, task_id: int | None = None, task_type: str = "cron") -> None:
+    try:
+        _run_job(target)
+    finally:
+        # In a finally: a task that fired has fired, whatever the outcome. Leaving it
+        # active on failure would make it misfire on every restart from then on.
+        if task_type == "date" and task_id is not None:
+            retire_one_shot_task(task_id)
+
+
+def _run_job(target: str) -> None:
     if target == "GLOBAL":
         logger.info("Ejecutando tarea programada: GLOBAL")
         global_update_job()
@@ -241,7 +284,7 @@ def refresh_scheduler_jobs() -> None:
                 scheduler.add_job(
                     job_wrapper,
                     trigger,
-                    args=[task.target],
+                    args=[task.target, task.id, task.task_type],
                     id=job_id,
                     replace_existing=True,
                 )

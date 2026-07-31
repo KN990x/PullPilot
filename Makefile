@@ -46,5 +46,6 @@ up:
 lint:
 	$(PY) -m ruff check server tests && $(PY) -m compileall server && cd web && $(PNPM) run lint && $(PNPM) run build
 
+# Both suites, because a contract change touches server/routers and web/src/lib/api.js.
 test:
-	$(PY) -m pytest tests/
+	$(PY) -m pytest tests/ && cd web && $(PNPM) run test

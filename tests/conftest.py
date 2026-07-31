@@ -11,27 +11,46 @@ from fastapi.testclient import TestClient
 from server import auth_state, login_rate_limit
 from server.app import app
 from server.database import session_scope
-from server.models.db import AuthCredential
+from server.models.db import AuthCredential, ProjectSettings, ScheduledTask, UpdateLog
 from server.services import auth as auth_service
 
 SETUP_USERNAME = "admin"
 SETUP_PASSWORD = "supersecreta"
 
+# Everything a test can write. The database is in-memory with StaticPool, so it is one
+# connection shared by the whole process: anything left behind is the next test's
+# starting state. `logs` and `projects` used to leak, and more than one assertion passed
+# only because of the order pytest happened to pick.
+_MUTABLE_TABLES = (AuthCredential, ProjectSettings, ScheduledTask, UpdateLog)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _create_schema():
+    """The schema normally appears in the lifespan, which only a TestClient triggers.
+
+    Session-scoped and autouse so it runs before the per-test truncation, which would
+    otherwise hit tables that do not exist yet in a test that never opens a client.
+    """
+    from server.database import Base, engine
+
+    Base.metadata.create_all(bind=engine)
+
 
 @pytest.fixture(autouse=True)
-def _clean_auth_state():
-    """Leave the authentication state as it was.
-
-    The test database is in-memory with StaticPool, one connection shared by the whole
-    process: without this, a test that creates credentials leaves them behind and the
-    outcome depends on ordering.
-    """
+def _clean_database_state():
+    """Every test starts and ends against empty tables."""
+    _truncate()
     yield
-    with session_scope() as db:
-        db.query(AuthCredential).delete()
-        db.commit()
+    _truncate()
     auth_state.reset_for_tests()
-    login_rate_limit._failed_attempts.clear()
+    login_rate_limit.reset_for_tests()
+
+
+def _truncate() -> None:
+    with session_scope() as db:
+        for model in _MUTABLE_TABLES:
+            db.query(model).delete()
+        db.commit()
 
 
 @pytest.fixture()

@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -13,16 +15,32 @@ from server.services.scheduler import build_trigger, refresh_scheduler_jobs
 router = APIRouter(prefix="/api", tags=["schedules"])
 
 
+_OFFSET_RE = re.compile(r"(Z|[+-]\d{2}:\d{2})$")
+
+
 def _normalize_date_expression(raw: str) -> str:
+    """Turn what the browser sends into what APScheduler's parser accepts.
+
+    It requires seconds, which `datetime-local` never produces. The trailing offset, when
+    the frontend pins one, is what keeps a wall-clock the user picked in their own
+    timezone from being read in the container's.
+    """
     s = raw.strip().replace("T", " ", 1)
+    offset = ""
+    match = _OFFSET_RE.search(s)
+    if match:
+        offset = match.group(1)
+        s = s[: match.start()].strip()
     if s.count(":") == 1:
         s = f"{s}:00"
-    return s
+    return f"{s}{offset}"
 
 
 @router.get("/schedules", response_model=list[ScheduledTaskOut])
 def get_schedules(db: Session = Depends(get_db)):
-    return db.query(ScheduledTask).all()
+    # Only active ones: a one-shot task that already fired is retired by the scheduler,
+    # and listing it still would say it is about to run when it never will again.
+    return db.query(ScheduledTask).filter(ScheduledTask.active.is_(True)).all()
 
 
 @router.post("/schedules", response_model=ScheduledTaskOut)
@@ -43,7 +61,7 @@ def create_schedule(
         expression = _normalize_date_expression(data.date_iso or "")
 
     try:
-        build_trigger(data.task_type, expression)
+        build_trigger(data.task_type, expression, locale=locale)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

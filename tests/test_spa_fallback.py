@@ -87,3 +87,30 @@ def test_index_is_served_at_the_root(spa_client: TestClient) -> None:
 
 def test_existing_api_route_is_untouched(spa_client: TestClient) -> None:
     assert spa_client.get("/api/projects").json() == []
+
+
+def test_a_missing_hashed_asset_is_a_404_not_the_shell(spa_client: TestClient) -> None:
+    """After a redeploy the old hashed names are gone.
+
+    Answering those with the shell handed a stale tab HTML with status 200 where it
+    expected JavaScript, which is a blank page instead of an error the browser reports.
+    """
+    response = spa_client.get("/assets/index-deadbeef.js")
+
+    assert response.status_code == 404
+    assert "id=root" not in response.text
+
+
+def test_any_dotted_path_is_treated_as_a_file(spa_client: TestClient) -> None:
+    response = spa_client.get("/manifest-abc123.webmanifest")
+
+    assert response.status_code == 404
+
+
+def test_the_shell_is_never_cached(spa_client: TestClient) -> None:
+    """index.html names every hashed asset, so a cached copy outlives what it points at."""
+    for path in ("/", "/history"):
+        response = spa_client.get(path)
+        assert response.status_code == 200
+        assert "id=root" in response.text
+        assert response.headers.get("cache-control") == "no-cache", path

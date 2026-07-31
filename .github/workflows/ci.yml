@@ -67,6 +67,10 @@ jobs:
         working-directory: web
         run: pnpm run lint
 
+      - name: Test frontend
+        working-directory: web
+        run: pnpm run test
+
       - name: Build frontend
         working-directory: web
         run: pnpm run build

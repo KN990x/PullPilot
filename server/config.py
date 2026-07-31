@@ -40,24 +40,38 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
 DB_PATH = DATA_DIR / "pullpilot.db"
 STATIC_DIR = BASE_DIR / "static"
 
-# Before anything else: the session secret is written here and reports failures by log.
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("pullpilot")
 
+# Before anything else: the session secret is written here, and the database lives here
+# too. Unlike the secret, which degrades to an in-memory one, there is no working
+# PullPilot without this directory — so say exactly what to fix and then let it fail,
+# rather than raising a bare OSError from inside an import.
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    logger.error(
+        "No se pudo crear el directorio de datos %s. Ahí viven la base de datos y el "
+        "secreto de sesión: revisa que el volumen esté montado y sea escribible.",
+        DATA_DIR,
+    )
+    raise
+
 HEALTHCHECK_TIMEOUT = 60
 COMMAND_TIMEOUT = 300
 
-# Language of scheduled update logs. The only thing that cannot be derived from a request:
-# the scheduler runs them with no browser behind to read Accept-Language from.
-_raw_log_locale = (os.getenv("LOG_LOCALE") or "es").strip().lower()
-LOG_LOCALE: Literal["es", "en"] = (
-    _raw_log_locale if _raw_log_locale in ("es", "en") else "es"
-)
+# History rows kept. The UI only ever reads the newest 20; the rest is there to look back
+# at a bad night. Without a ceiling the table grew forever, each row holding a full log.
+HISTORY_RETENTION = 200
+
+# Language of scheduled update logs: the scheduler runs with no browser behind it, so
+# there is no Accept-Language to read. A constant, not a variable — it was read from the
+# environment but documented nowhere, so nobody can have it set. Making the scheduler
+# speak English is a matter of persisting the UI language, not of a fifth variable.
+LOG_LOCALE: Literal["es", "en"] = "es"
 
 # SameSite=lax and nothing else: `none` would need HTTPS and allow cross-site requests,
 # `strict` buys nothing in an app that serves its own frontend.

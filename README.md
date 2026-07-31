@@ -83,7 +83,7 @@ Open **http://your-server-ip:8000**. That is the whole installation.
 
 - **Dashboard:** cards per project; status, per-project update, **Full stop** and **Exclude** toggles.
 - **Update All:** scans non-excluded projects, `git pull` where applicable, recreates containers; summary in **History**.
-- **Schedule:** default global update daily at 04:00 (container time).
+- **Schedule:** create cron or one-off tasks per project, or for everything at once. There is no schedule until you create one; the form suggests 04:00. Cron times follow the container clock (`TZ`); a one-off task keeps the timezone of the browser that created it.
 
 ## Local development (contributors)
 
@@ -100,6 +100,13 @@ Day-to-day: `make dev` runs the backend and the Vite dev server together (see [`
 - **GHCR image:** the published image is `ghcr.io/kn990x/pullpilot`. If you still pin `ghcr.io/kernel-nomad/pullpilot`, update your compose file or `docker pull` to the new path.
 - **Docker socket:** treat PullPilot like root access; do not expose port 8000 to the public internet without TLS (reverse proxy), a strong password, and ideally an extra auth layer (Authelia, Authentik, etc.).
 - **Stack paths:** updates and scheduled jobs only run under `STACKS_PATH` (resolved); database paths outside that tree are rejected.
+- **What happens when an update fails:** before pulling, PullPilot records which local
+  image each service is currently using. If the deploy or the healthcheck fails it puts
+  those tags back, reverts the compose file when the stack is a Git clone, and brings the
+  stack up again either way — so a failed update does not leave it down. Two limits worth
+  knowing: services built from a `Dockerfile` (`build:`) are rebuilt rather than reverted,
+  and an image that had never been pulled on this host has no previous version to go back
+  to.
 - **Single worker:** one Uvicorn worker per instance. The signing secret *is* shared across workers (it lives in a file inside the data volume), but the scheduler, the login rate limit and the progress state are per process, so more than one worker means duplicated scheduled updates.
 - **Auth:** credentials live hashed in the database and are created through the setup wizard on first run. There is no environment variable that can create, replace or bypass them.
 - **Changing the password:** the account button in the header (next to the language switch) changes username and password. Doing so signs out every other device.
@@ -128,7 +135,7 @@ Everything is optional. Copy [`.env.example`](./.env.example) to `.env` next to 
 | `TZ` | `UTC` | Container timezone — the one scheduled tasks run on. |
 | `PUBLIC_URL` | (unset) | Only behind a reverse proxy. An `https://` value marks the session cookie `Secure` and makes the login rate limit read `X-Forwarded-For`. |
 
-Everything that used to be configurable — the session secret, the cookie's `SameSite`, CORS origins, command timeouts, the login rate limit, the static files path — is now either generated automatically or a constant with a sensible value. If you had `DOCKER_ROOT_PATH` in an older `.env`, it still works: it is read as an alias of `STACKS_PATH`.
+Everything that used to be configurable — the session secret, the cookie's `SameSite`, CORS origins, command timeouts, the login rate limit, the static files path — is now either generated automatically or a constant with a sensible value. If you had `DOCKER_ROOT_PATH` in an older `.env`, it still works: it is read as an alias of `STACKS_PATH`. `DATA_DIR` also exists, but it is internal: the container fixes it to `/app/data` and `make dev-server` points it at `.devdata`. It is not part of the four and there is no reason to set it.
 
 ---
 
@@ -174,7 +181,7 @@ Abre **http://tu-servidor-ip:8000**. Eso es toda la instalación.
 
 - **Dashboard:** tarjetas por proyecto; estado, actualización por proyecto, interruptores **Full stop** y **Excluir**.
 - **Actualizar todo:** escanea proyectos no excluidos, `git pull` cuando aplique, recrea contenedores; resumen en **Historial**.
-- **Programación:** actualización global diaria por defecto a las 04:00 (hora del contenedor).
+- **Programación:** crea tareas cron o de un solo uso por proyecto, o para todo a la vez. No hay ninguna programación hasta que la creas; el formulario sugiere las 04:00. Las horas de cron van con el reloj del contenedor (`TZ`); una tarea de un solo uso conserva la zona horaria del navegador que la creó.
 
 ## Desarrollo local (contribuidores)
 
@@ -191,6 +198,13 @@ Día a día: `make dev` levanta el backend y el servidor de Vite a la vez (véas
 - **Imagen GHCR:** la imagen publicada es `ghcr.io/kn990x/pullpilot`. Si sigues usando `ghcr.io/kernel-nomad/pullpilot`, actualiza el compose o `docker pull` a la nueva ruta.
 - **Socket de Docker:** trata PullPilot como acceso de nivel root; no expongas el puerto 8000 a internet pública sin TLS (proxy inverso), una contraseña robusta y, si es posible, otra capa de autenticación (Authelia, Authentik, etc.).
 - **Rutas de stacks:** las actualizaciones y tareas programadas solo se ejecutan bajo `STACKS_PATH` (resuelto); las rutas en base de datos fuera de ese árbol se rechazan.
+- **Qué pasa cuando una actualización falla:** antes de descargar nada, PullPilot anota qué
+  imagen local usa cada servicio. Si falla el despliegue o el healthcheck, devuelve esos
+  tags a su sitio, revierte el fichero compose cuando el stack es un clon de Git, y en
+  cualquier caso vuelve a levantar el stack — así un fallo no lo deja caído. Dos límites a
+  tener presentes: los servicios que se construyen desde un `Dockerfile` (`build:`) se
+  reconstruyen en vez de revertirse, y una imagen que nunca se había descargado en este
+  host no tiene versión anterior a la que volver.
 - **Un solo worker:** un worker de Uvicorn por instancia. El secreto de firma **sí** se comparte entre workers (vive en un fichero dentro del volumen de datos), pero el scheduler, el límite de intentos de login y el estado de progreso son por proceso, así que más de un worker significa actualizaciones programadas duplicadas.
 - **Autenticación:** las credenciales viven hasheadas en la base de datos y se crean con el asistente en el primer arranque. No hay ninguna variable de entorno capaz de crearlas, sustituirlas ni saltárselas.
 - **Cambiar la contraseña:** el botón de cuenta de la cabecera (junto al selector de idioma) cambia usuario y contraseña. Al hacerlo se cierra la sesión en el resto de dispositivos.
@@ -219,4 +233,4 @@ Todo es opcional. Copia [`.env.example`](./.env.example) a `.env` junto al `dock
 | `TZ` | `UTC` | Zona horaria del contenedor — la que usan las tareas programadas. |
 | `PUBLIC_URL` | (sin definir) | Solo con un proxy inverso delante. Con `https://` la cookie de sesión se marca `Secure` y el rate limit de login lee `X-Forwarded-For`. |
 
-Todo lo que antes era configurable — el secreto de sesión, el `SameSite` de la cookie, los orígenes CORS, los timeouts de comandos, el límite de intentos de login, la ruta de los estáticos — ahora se genera solo o es una constante con un valor sensato. Si tenías `DOCKER_ROOT_PATH` en un `.env` antiguo, sigue funcionando: se lee como alias de `STACKS_PATH`.
+Todo lo que antes era configurable — el secreto de sesión, el `SameSite` de la cookie, los orígenes CORS, los timeouts de comandos, el límite de intentos de login, la ruta de los estáticos — ahora se genera solo o es una constante con un valor sensato. Si tenías `DOCKER_ROOT_PATH` en un `.env` antiguo, sigue funcionando: se lee como alias de `STACKS_PATH`. `DATA_DIR` también existe, pero es interna: el contenedor la fija a `/app/data` y `make dev-server` la apunta a `.devdata`. No forma parte de las cuatro y no hay motivo para ponerla.

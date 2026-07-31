@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 import server.routers.projects as projects_router_module
 import server.services.projects as projects_module
@@ -310,3 +312,73 @@ def test_validate_startup_warns_on_an_ephemeral_secret(
     with caplog.at_level("WARNING", logger="pullpilot"):
         cfg.validate_startup_security()
     assert "secreto de sesión" in caplog.text
+
+
+def test_history_timestamps_carry_an_utc_offset(client: TestClient) -> None:
+    """SQLite drops the tzinfo, so the row comes back naive and was serialised naive.
+
+    Without an offset the browser's `new Date(...)` reads the string as local time and
+    the history was shown shifted by the viewer's UTC offset.
+    """
+    from server.services.update_logs import persist_update_log
+
+    db = SessionLocal()
+    try:
+        persist_update_log(db, status="SUCCESS", summary="x", details={})
+    finally:
+        db.close()
+
+    row = client.get("/api/history").json()[0]
+    assert row["timestamp"].endswith("Z") or "+00:00" in row["timestamp"]
+
+    parsed = datetime.fromisoformat(row["timestamp"])
+    assert parsed.tzinfo is not None
+    # Within a minute of now: proves it is really UTC and not local read as UTC.
+    delta = abs((datetime.now(UTC) - parsed).total_seconds())
+    assert delta < 60, f"timestamp is {delta}s away from now"
+
+
+def _fake_compose(running: int, declared: int):
+    """`compose ps -q` lists what is up; `config --services` what the file declares."""
+
+    def run(cmd, cwd=None, **_kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.endswith("ps -q"):
+            return "\n".join(f"container{n}" for n in range(running))
+        if text.endswith("config --services"):
+            return "\n".join(f"svc{n}" for n in range(declared))
+        return ""
+
+    return run
+
+
+@pytest.mark.parametrize(
+    ("running", "declared", "expected"),
+    [
+        (3, 3, "running"),
+        (2, 5, "partial"),
+        (0, 5, "stopped"),
+        # More containers than services: a scaled service, still healthy.
+        (6, 3, "running"),
+    ],
+)
+def test_project_status_reports_a_half_up_stack(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    running: int,
+    declared: int,
+    expected: str,
+) -> None:
+    """A stack with 2 of 5 services alive used to report `running` and look healthy."""
+    root = tmp_path / "stacks"
+    proj = root / "half"
+    proj.mkdir(parents=True)
+    (proj / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(projects_module, "run_command", _fake_compose(running, declared))
+
+    body = client.get("/api/projects").json()
+
+    assert [p["status"] for p in body] == [expected]
+    assert body[0]["containers"] == running

@@ -32,8 +32,14 @@ def run_command(
     cwd: str | None = None,
     *,
     log_exec: bool = True,
+    log_errors: bool = True,
     locale: str = "es",
 ) -> str:
+    """Run a command and return its stdout. RuntimeError on failure or timeout.
+
+    `log_errors=False` is for probes where failing is an ordinary answer, such as asking
+    whether an image exists locally: those would otherwise fill the log at ERROR level.
+    """
     if isinstance(cmd, str):
         cmd_args = shlex.split(cmd)
         cmd_display = cmd
@@ -62,7 +68,8 @@ def run_command(
             f"{t('docker.timeout_configured', locale, seconds=COMMAND_TIMEOUT)}\n"
             f"{t('docker.stderr_label', locale)} {stderr}"
         )
-        logger.error(error_msg)
+        if log_errors:
+            logger.error(error_msg)
         raise RuntimeError(error_msg) from exc
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr or ""
@@ -70,5 +77,6 @@ def run_command(
             f"{t('docker.error_command', locale, cmd=cmd_display)}\n"
             f"{t('docker.stderr_label', locale)} {stderr}"
         )
-        logger.error(error_msg)
+        if log_errors:
+            logger.error(error_msg)
         raise RuntimeError(error_msg) from exc

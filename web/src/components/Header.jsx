@@ -67,8 +67,8 @@ export default function Header({
             label={t("app.change_language")}
             onClick={onToggleLanguage}
           >
-            {/* Normalizado: el detector del navegador devuelve "es-ES", y en la pill
-                se leería "ES-ES" en lugar del código de dos letras del diseño. */}
+            {/* Normalised: the browser detector returns "es-ES", which would render as
+                "ES-ES" instead of the two-letter code the pill is designed around. */}
             <span className="text-xs font-bold">
               {normalizeUiLocale(i18n.language).toUpperCase()}
             </span>

@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from server.auth_policy import (
     PASSWORD_MAX_LEN,
@@ -75,7 +75,9 @@ class AuthResultOut(BaseModel):
 class Project(BaseModel):
     name: str
     path: str
-    status: str
+    # Spelled out rather than a bare str: the dashboard branches on all four, and
+    # `partial` sat unreachable in the UI while the API could only ever say `running`.
+    status: Literal["running", "partial", "stopped", "error"]
     containers: int
     excluded: bool
     full_stop: bool
@@ -121,3 +123,14 @@ class UpdateLogOut(BaseModel):
     status: str
     summary: str
     details: str
+
+    @field_validator("timestamp")
+    @classmethod
+    def _mark_as_utc(cls, value: datetime) -> datetime:
+        """Rows are written in UTC, but SQLite has no datetime type and drops the tzinfo.
+
+        Serialised without an offset, `new Date(...)` in the browser reads the string as
+        local time, so the history was shown shifted by the viewer's UTC offset. Stamping
+        it here also fixes the rows already stored, which were always UTC too.
+        """
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value

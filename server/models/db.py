@@ -58,8 +58,11 @@ class UpdateLog(Base):
     __tablename__ = "logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # Indexed because every read of this table is "the newest N, most recent first".
+    # Written in UTC; SQLite drops the tzinfo, which UpdateLogOut puts back on the way out.
     timestamp: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
+        index=True,
         default=lambda: datetime.datetime.now(datetime.UTC),
     )
     status: Mapped[str] = mapped_column(String)
