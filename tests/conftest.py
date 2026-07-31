@@ -20,11 +20,11 @@ SETUP_PASSWORD = "supersecreta"
 
 @pytest.fixture(autouse=True)
 def _clean_auth_state():
-    """Deja el estado de autenticación como estaba.
+    """Leave the authentication state as it was.
 
-    La base de datos de test es in-memory con StaticPool, o sea una única conexión
-    compartida por todo el proceso: sin esto, un test que crea credenciales las deja
-    puestas para todos los que vengan detrás y el resultado depende del orden.
+    The test database is in-memory with StaticPool, one connection shared by the whole
+    process: without this, a test that creates credentials leaves them behind and the
+    outcome depends on ordering.
     """
     yield
     with session_scope() as db:
@@ -36,20 +36,20 @@ def _clean_auth_state():
 
 @pytest.fixture()
 def auth_client() -> TestClient:
-    """Cliente sin credenciales creadas: la instalación está pendiente."""
+    """Client with no credentials created yet: setup is pending."""
     with TestClient(app) as c:
-        # Después de entrar en el context manager: el lifespan llama a prime() y
-        # sobrescribiría el estado si lo preparásemos antes.
+        # After entering the context manager: the lifespan calls prime() and would
+        # overwrite anything set up earlier.
         auth_state.reset_for_tests()
         yield c
 
 
 @pytest.fixture()
 def client(auth_client: TestClient) -> TestClient:
-    """Cliente con el asistente completado y la sesión abierta.
+    """Client with the wizard completed and a session open.
 
-    Es el cliente por defecto porque ya no existe ninguna escotilla que abra la API: la
-    única forma de llegar a un endpoint es con sesión, igual que en producción.
+    The default, because no escape hatch opens the API any more: a session is the only way
+    to reach an endpoint, exactly as in production.
     """
     response = auth_client.post(
         "/api/auth/setup",
@@ -63,7 +63,7 @@ def client(auth_client: TestClient) -> TestClient:
     return auth_client
 
 
-# Alias histórico: varios tests de autenticación piden explícitamente "el cliente logueado".
+# Historic alias: several auth tests ask for "the logged-in client" by name.
 @pytest.fixture()
 def logged_in_client(client: TestClient) -> TestClient:
     return client

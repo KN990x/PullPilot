@@ -3,9 +3,9 @@ import { RefreshCw, ServerCrash } from "lucide-react";
 import AuthLayout from "./AuthLayout";
 
 /**
- * El backend no responde. Antes esto caía en el modo demo y el usuario veía un panel con
- * proyectos falsos (Plex, Pi-hole, Vaultwarden) como si fueran suyos — justo lo que pasa
- * mientras PullPilot se actualiza a sí mismo y su propio contenedor se está recreando.
+ * The backend is not answering. This used to fall through to demo mode and show fake
+ * projects as if they were the user's, which is exactly what happens while PullPilot is
+ * updating itself.
  */
 export default function OfflineView({ t, i18n, onToggleLanguage, onRetry, retrying }) {
   return (

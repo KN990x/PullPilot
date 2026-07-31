@@ -1,13 +1,12 @@
-"""Limitación simple por IP de intentos fallidos de login (en memoria)."""
+"""Simple in-memory per-IP limit on failed login attempts."""
 
 from __future__ import annotations
 
 import time
 from collections import defaultdict
 
-# Constantes, no configuración: 15 fallos en 5 minutos frena la fuerza bruta sin estorbar
-# a quien se equivoca de contraseña un par de veces. Nadie tenía motivo para tocarlo, y
-# desactivarlo desde el entorno solo servía para dispararse en el pie.
+# Constants, not configuration: 15 failures in 5 minutes stops brute force without
+# bothering anyone who mistypes their password twice.
 MAX_ATTEMPTS = 15
 WINDOW_SEC = 300
 
@@ -36,7 +35,7 @@ def clear_login_failures(client_ip: str) -> None:
 
 
 def seconds_until_reset(client_ip: str) -> int:
-    """Segundos que faltan para que caduque el intento más antiguo de la ventana."""
+    """Seconds until the oldest attempt in the window expires."""
     times = _failed_attempts.get(client_ip)
     if not times:
         return 0

@@ -32,8 +32,8 @@ from server.routers.status import router as status_router
 from server.services import auth as auth_service
 from server.services.scheduler import start_scheduler, stop_scheduler
 
-# Endpoints de la API que tienen que responder sin sesión: son los que permiten a la SPA
-# averiguar en qué estado está la instalación y salir de él.
+# The only endpoints that answer without a session: what the SPA needs to find out which
+# state the install is in, and to get out of it.
 AUTH_PUBLIC_API_PATHS = frozenset(
     {
         "/api/auth/status",
@@ -43,8 +43,8 @@ AUTH_PUBLIC_API_PATHS = frozenset(
     }
 )
 AUTH_PUBLIC_PATHS = frozenset({"/login", "/logout"})
-# Rutas que acaban en una extensión "pública" pero no lo son: el esquema de OpenAPI
-# describe la API entera y hasta ahora se servía sin sesión por culpa del sufijo .json.
+# Public-looking extension, private content: /openapi.json describes the whole API and was
+# served to anonymous callers because of the .json suffix.
 AUTH_NEVER_PUBLIC_PATHS = frozenset({"/openapi.json", "/docs", "/redoc"})
 AUTH_PUBLIC_PATH_EXTENSIONS = (
     ".png",
@@ -59,8 +59,8 @@ AUTH_PUBLIC_PATH_EXTENSIONS = (
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # create_all va primero porque todo lo que sigue consulta la base de datos. En una
-    # instalación existente esto solo añade tablas nuevas: no altera las que ya están.
+    # First, because everything below queries the database. On an existing install this
+    # only adds new tables; it never alters the ones already there.
     Base.metadata.create_all(bind=engine)
 
     with session_scope() as db:
@@ -77,6 +77,7 @@ async def lifespan(_: FastAPI):
 
     validate_startup_security()
 
+    # Warn, do not fail: the folder can appear later without restarting the container.
     if not STACKS_PATH.exists():
         logger.warning(
             "La carpeta de stacks no existe: %s. Créala en el host (por defecto "
@@ -92,13 +93,10 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="PullPilot API", lifespan=lifespan)
 
-# Middleware order (Starlette): the last one added via add_middleware receives the
-# request first. SessionMiddleware → routes and this auth_middleware (http), so that
-# request.session is available here.
-#
-# No hay CORSMiddleware a propósito: el backend sirve la propia SPA y en desarrollo Vite
-# hace de proxy, así que no existe ninguna petición cross-origin en un escenario
-# soportado. Lo que había antes permitía cualquier origen.
+# Middleware order (Starlette): the last one added receives the request first, so
+# SessionMiddleware runs before this auth_middleware and request.session is available here.
+# No CORSMiddleware on purpose: the backend serves its own SPA and Vite proxies in
+# development, so no supported scenario makes a cross-origin request.
 
 
 def _is_api_path(path: str) -> bool:
@@ -106,9 +104,8 @@ def _is_api_path(path: str) -> bool:
 
 
 def _is_public_path(path: str) -> bool:
-    # El orden importa: bajo /api se decide SOLO por lista blanca. Antes bastaba con que
-    # la ruta acabara en .json para saltarse la autenticación, así que /api/loquesea.json
-    # y /openapi.json quedaban abiertos.
+    # Order matters: under /api it is allowlist only. Deciding by suffix left
+    # /api/anything.json and /openapi.json open.
     if _is_api_path(path):
         return path in AUTH_PUBLIC_API_PATHS
     if path in AUTH_NEVER_PUBLIC_PATHS:
@@ -119,7 +116,7 @@ def _is_public_path(path: str) -> bool:
 
 
 def _requires_session(path: str) -> bool:
-    """Rutas que responden 401 en vez de dejar pasar el shell estático de la SPA."""
+    """Paths that answer 401 instead of letting the static SPA shell through."""
     return _is_api_path(path) or path in AUTH_NEVER_PUBLIC_PATHS
 
 
@@ -131,9 +128,8 @@ async def auth_middleware(request: Request, call_next):
     if _is_public_path(path):
         return await call_next(request)
 
-    # Instalación pendiente: el shell de la SPA se sirve para que pueda pintar el
-    # asistente, pero la API sigue cerrada salvo la lista blanca. El bundle es estático
-    # y no lleva datos; todo lo del homelab entra por /api.
+    # Setup pending: the SPA shell is served so it can draw the wizard, but the API stays
+    # closed. The bundle is static and carries no data; the homelab is all behind /api.
     if not snapshot.configured:
         if _requires_session(path):
             return JSONResponse(
@@ -151,8 +147,7 @@ async def auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Sesión expirada", "code": "session_expired"},
             )
-        # Ya no se redirige a /login: la SPA decide qué pintar consultando
-        # /api/auth/status.
+        # No redirect to /login: the SPA decides what to draw from /api/auth/status.
         return await call_next(request)
 
     request.session["user"] = user
@@ -164,9 +159,8 @@ async def auth_middleware(request: Request, call_next):
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     errors = jsonable_encoder(exc.errors())
-    # Pydantic incluye el valor rechazado en `input`; bajo /api/auth eso significa
-    # devolver al navegador (y a los logs de cualquier proxy) la contraseña que el
-    # usuario acaba de escribir.
+    # Pydantic echoes the rejected value in `input`; under /api/auth that hands the
+    # password the user just typed back to the browser and to any proxy's logs.
     if request.url.path.startswith("/api/auth"):
         errors = [{k: v for k, v in item.items() if k != "input"} for item in errors]
         return JSONResponse(
@@ -193,20 +187,18 @@ app.include_router(status_router)
 
 
 def register_spa_fallback(target: FastAPI, static_dir: Path) -> None:
-    """Sirve el bundle de Vite y hace que las rutas de la SPA resuelvan al shell.
+    """Serve the Vite bundle and resolve SPA routes to its shell.
 
-    Está en una función y no suelto en el módulo para poder probarlo: en desarrollo
-    `server/static` no existe, así que el handler ni se registraba y el fallo de abajo
-    no lo veía ningún test.
+    A function so it can be tested: `server/static` only exists inside the image, so
+    outside it the handler is never registered and no ordinary test reaches it.
     """
     target.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
 
     @target.exception_handler(404)
     async def not_found_handler(request: Request, exc):
-        # Ojo: este handler recibe también las HTTPException(404) de los routers. Cuando
-        # devolvía el HTML de la SPA sin más, un `DELETE /api/schedules/9999` respondía
-        # 200 + index.html y el frontend daba el borrado por bueno. La API responde
-        # siempre JSON; el shell es solo para la navegación del navegador.
+        # This also catches HTTPException(404) from the routers. Returning the SPA shell
+        # for those answered `DELETE /api/schedules/9999` with 200 + index.html, and the
+        # frontend took the delete as done. The API always answers JSON.
         if _is_api_path(request.url.path) or request.method not in ("GET", "HEAD"):
             detail = getattr(exc, "detail", "Not Found")
             return JSONResponse(status_code=404, content={"detail": detail})

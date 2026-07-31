@@ -1,8 +1,7 @@
-"""Credenciales de acceso: hashing con scrypt (stdlib) y ciclo de vida de la fila única.
+"""Credentials: scrypt hashing (stdlib) and the lifecycle of the single row.
 
-Solo puede existir un juego de credenciales, por eso todo gira alrededor de la fila con
-id = AUTH_ROW_ID. La crea el asistente de primera instalación y a partir de ahí manda la
-base de datos: no hay ninguna variable de entorno que pueda cambiarlas.
+Only one set of credentials can exist, hence everything revolving around AUTH_ROW_ID. The
+setup wizard creates it; from then on the database is the only source of truth.
 """
 
 from __future__ import annotations
@@ -27,12 +26,9 @@ from server.auth_policy import (
 from server.config import logger
 from server.models.db import AUTH_ROW_ID, AuthCredential
 
-# n=2^14, r=8, p=1 => 128*n*r = 16 MiB y ~25 ms en un x86/ARM64 de escritorio, del orden
-# de 100-200 ms en una Raspberry Pi 4. Es el punto donde el login sigue siendo
-# imperceptible y un ataque offline con GPU deja de ser cómodo. Subir a 2^15 duplicaría
-# tiempo y memoria y además exige maxmem explícito: el límite por defecto de OpenSSL son
-# 32 MiB y rechaza el cálculo. Ojo al pico agregado: el threadpool de FastAPI son 40
-# hilos, o sea hasta 640 MiB si llegan 40 logins a la vez.
+# 16 MiB and ~25 ms on a desktop CPU, 100-200 ms on a Raspberry Pi 4: login stays
+# imperceptible while an offline GPU attack does not. 2^15 would need an explicit maxmem
+# (OpenSSL's default 32 MiB rejects it) and, with FastAPI's 40-thread pool, peak at 1.2 GiB.
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
@@ -40,37 +36,37 @@ SCRYPT_DKLEN = 32
 SCRYPT_MAXMEM = 64 * 1024 * 1024
 _ALGO = "scrypt"
 
-# Cotas de cordura al verificar: un hash manipulado en la base de datos con un n enorme
-# sería una bomba de memoria en el propio login.
+# Sanity bounds when verifying: a tampered hash with a huge n would turn login itself into
+# a memory bomb.
 _MAX_VERIFY_N = 2**20
 _MAX_VERIFY_R = 32
 _MAX_VERIFY_P = 16
 
 _USERNAME_RE = re.compile(USERNAME_PATTERN)
 
-# Evita que dos peticiones del mismo proceso lleguen a la vez al INSERT. La carrera entre
-# procesos la corta la clave primaria; esto solo ahorra el IntegrityError en el caso común.
+# Keeps two requests in the same process off the INSERT at once. The cross-process race is
+# cut by the primary key; this only avoids the IntegrityError in the common case.
 _setup_lock = threading.Lock()
 
 
 class AuthError(Exception):
-    """Base de los errores de dominio de autenticación."""
+    """Base class for the authentication domain errors."""
 
 
 class SetupAlreadyCompletedError(AuthError):
-    """Ya existen credenciales: el asistente no puede volver a ejecutarse."""
+    """Credentials already exist: the wizard cannot run again."""
 
 
 class SetupRequiredError(AuthError):
-    """Todavía no hay credenciales."""
+    """No credentials yet."""
 
 
 class InvalidCredentialsError(AuthError):
-    """Usuario o contraseña incorrectos."""
+    """Wrong username or password."""
 
 
 def validate_username(value: str) -> str:
-    """Normaliza y valida el usuario. ValueError con el motivo si no cumple."""
+    """Normalise and validate the username. ValueError with the reason if it fails."""
     cleaned = (value or "").strip()
     if len(cleaned) < USERNAME_MIN_LEN or len(cleaned) > USERNAME_MAX_LEN:
         raise ValueError(
@@ -82,7 +78,7 @@ def validate_username(value: str) -> str:
 
 
 def validate_password(value: str) -> str:
-    """Valida la contraseña. No se hace strip: los espacios son parte de la contraseña."""
+    """Validate the password. Not stripped: whitespace is part of the password."""
     if not value or len(value) < PASSWORD_MIN_LEN:
         raise ValueError(f"La contraseña debe tener al menos {PASSWORD_MIN_LEN} caracteres")
     if len(value) > PASSWORD_MAX_LEN:
@@ -97,10 +93,10 @@ def hash_password(
     r: int = SCRYPT_R,
     p: int = SCRYPT_P,
 ) -> str:
-    """Devuelve 'scrypt$n$r$p$salt_b64$hash_b64'.
+    """Return 'scrypt$n$r$p$salt_b64$hash_b64'.
 
-    Los parámetros viajan dentro del hash, así que se pueden endurecer en el futuro sin
-    invalidar los hashes ya almacenados.
+    The parameters travel inside the hash, so they can be hardened later without
+    invalidating the hashes already stored.
     """
     salt = secrets.token_bytes(16)
     derived = hashlib.scrypt(
@@ -125,7 +121,7 @@ def hash_password(
 
 
 def verify_password(password: str, stored: str) -> bool:
-    """Comparación en tiempo constante. False (con aviso) si `stored` está corrupto."""
+    """Constant-time comparison. False (and a warning) if `stored` is corrupt."""
     parts = (stored or "").split("$")
     if len(parts) != 6 or parts[0] != _ALGO:
         logger.warning("Hash de contraseña con formato desconocido; se rechaza el acceso.")
@@ -133,7 +129,7 @@ def verify_password(password: str, stored: str) -> bool:
 
     try:
         n, r, p = int(parts[1]), int(parts[2]), int(parts[3])
-        # binascii.Error hereda de ValueError, así que un base64 inválido cae aquí.
+        # binascii.Error subclasses ValueError, so invalid base64 lands here too.
         salt = base64.b64decode(parts[4], validate=True)
         expected = base64.b64decode(parts[5], validate=True)
     except ValueError:
@@ -176,7 +172,7 @@ def is_setup_complete(db: Session) -> bool:
 def create_initial_credentials(
     db: Session, *, username: str, password: str
 ) -> AuthCredential:
-    """Alta de la fila única. SetupAlreadyCompletedError si ya existe."""
+    """Create the single row. SetupAlreadyCompletedError if it already exists."""
     clean_user = validate_username(username)
     validate_password(password)
 
@@ -194,7 +190,7 @@ def create_initial_credentials(
         try:
             db.commit()
         except IntegrityError:
-            # Otro proceso ganó la carrera entre el SELECT y el INSERT.
+            # Another process won the race between the SELECT and the INSERT.
             db.rollback()
             raise SetupAlreadyCompletedError from None
         except SQLAlchemyError:
@@ -205,7 +201,7 @@ def create_initial_credentials(
 
 
 def verify_credentials(db: Session, *, username: str, password: str) -> bool:
-    """False si no hay credenciales, si el usuario no coincide o si la contraseña falla."""
+    """False if there are no credentials, the username differs or the password fails."""
     row = get_credentials(db)
     if row is None:
         return False
@@ -214,8 +210,8 @@ def verify_credentials(db: Session, *, username: str, password: str) -> bool:
         (username or "").strip().encode("utf-8"),
         row.username.encode("utf-8"),
     )
-    # El KDF se ejecuta siempre, también con el usuario equivocado: si no, el tiempo de
-    # respuesta delataría cuál es el usuario correcto.
+    # The KDF always runs, even for the wrong username: otherwise response time would
+    # give away which username is the right one.
     pass_ok = verify_password(password, row.password_hash)
     return user_ok and pass_ok
 
@@ -227,7 +223,7 @@ def change_credentials(
     new_username: str | None = None,
     new_password: str | None = None,
 ) -> AuthCredential:
-    """Cambia usuario y/o contraseña exigiendo la contraseña actual."""
+    """Change username and/or password, requiring the current password."""
     row = get_credentials(db)
     if row is None:
         raise SetupRequiredError
@@ -251,7 +247,7 @@ def change_credentials(
     if not changed:
         raise ValueError("No hay nada que cambiar")
 
-    # Invalida las cookies emitidas antes de este cambio.
+    # Invalidates every cookie issued before this change.
     row.token_version += 1
     try:
         db.commit()

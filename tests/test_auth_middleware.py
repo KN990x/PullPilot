@@ -8,14 +8,14 @@ from server import auth_state
 def test_api_paths_ending_in_a_public_extension_are_not_public(
     logged_in_client: TestClient, path: str
 ) -> None:
-    """Regresión: bastaba con que la ruta acabara en .json para saltarse la autenticación."""
+    """Regression: a .json suffix used to be enough to skip authentication."""
     logged_in_client.post("/api/auth/logout")
 
     assert logged_in_client.get(path).status_code == 401
 
 
 def test_openapi_schema_requires_a_session(logged_in_client: TestClient) -> None:
-    """El esquema describe la API entera y quedaba abierto por el sufijo .json."""
+    """The schema describes the whole API and was left open by its .json suffix."""
     logged_in_client.post("/api/auth/logout")
 
     assert logged_in_client.get("/openapi.json").status_code == 401
@@ -33,23 +33,23 @@ def test_openapi_is_reachable_with_a_session(logged_in_client: TestClient) -> No
 
 
 def test_status_endpoint_is_reachable_in_every_state(auth_client: TestClient) -> None:
-    # Instalación pendiente.
+    # Setup pending.
     assert auth_client.get("/api/auth/status").status_code == 200
 
     auth_client.post(
         "/api/auth/setup",
         json={"username": "admin", "password": "supersecreta", "password_confirm": "supersecreta"},
     )
-    # Con sesión.
+    # With a session.
     assert auth_client.get("/api/auth/status").status_code == 200
 
     auth_client.post("/api/auth/logout")
-    # Configurado pero sin sesión.
+    # Configured, no session.
     assert auth_client.get("/api/auth/status").status_code == 200
 
 
 def test_session_from_a_previous_token_version_is_rejected(logged_in_client: TestClient) -> None:
-    """Simula el reinicio tras un cambio de credenciales hecho por otro worker."""
+    """Simulates a restart after another worker changed the credentials."""
     assert logged_in_client.get("/api/projects").status_code == 200
 
     auth_state.bump_token_version(99)

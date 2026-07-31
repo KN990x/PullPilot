@@ -1,8 +1,8 @@
-"""Endpoints de autenticación.
+"""Authentication endpoints.
 
-Los path operations son síncronos (`def`, no `async def`) a propósito: FastAPI los
-ejecuta en el threadpool, así que los 25-200 ms que tarda scrypt no bloquean el event
-loop. Con `async def` y el hashing en línea, cada login congelaría el servidor entero.
+The path operations are sync (`def`, not `async def`) on purpose: FastAPI runs those in
+the threadpool, so scrypt's 25-200 ms never blocks the event loop. With `async def` every
+login would freeze the whole server.
 """
 
 from fastapi import APIRouter, Depends, Request, status
@@ -29,8 +29,8 @@ from server.models.schemas import (
 from server.services import auth as auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-# Rutas antiguas: existen solo para que los marcadores y las PWA con el bundle viejo no
-# se queden en un 404 o en un bucle de redirección.
+# Old routes, kept only so bookmarks and PWAs on the previous bundle do not hit a 404 or
+# a redirect loop.
 legacy_router = APIRouter(tags=["auth"])
 
 
@@ -61,7 +61,7 @@ def _rate_limited(ip: str) -> JSONResponse:
 
 
 def _open_session(request: Request, row: AuthCredential) -> None:
-    # clear() antes de escribir: higiene, la sesión nueva no hereda nada de la anterior.
+    # clear() before writing: the new session inherits nothing from the old one.
     request.session.clear()
     request.session["user"] = row.username
     request.session["v"] = row.token_version
@@ -69,7 +69,7 @@ def _open_session(request: Request, row: AuthCredential) -> None:
 
 @router.get("/status", response_model=AuthStatusOut)
 def auth_status(request: Request, db: Session = Depends(get_db)):
-    """Bootstrap de la SPA: público y siempre 200, también sin configurar."""
+    """SPA bootstrap: public and always 200, including before setup."""
     row = auth_service.get_credentials(db)
 
     session_valid = bool(
@@ -80,8 +80,7 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
     return AuthStatusOut(
         setup_complete=row is not None,
         authenticated=session_valid,
-        # El nombre de usuario solo se devuelve con una sesión real detrás, nunca a un
-        # anónimo.
+        # The username is only returned with a real session behind it, never to anonymous.
         username=row.username if (session_valid and row is not None) else None,
     )
 
@@ -92,8 +91,8 @@ def setup(request: Request, body: SetupInput, db: Session = Depends(get_db)):
     if is_login_rate_limited(ip):
         return _rate_limited(ip)
 
-    # Se comprueba antes de hashear: si no, una vez instalado el endpoint seguiría siendo
-    # un amplificador de 16 MiB y 200 ms por petición.
+    # Checked before hashing: otherwise this endpoint stays a 16 MiB, 200 ms amplifier
+    # long after the install is done.
     if auth_service.is_setup_complete(db):
         return _error(
             status.HTTP_409_CONFLICT,
@@ -137,8 +136,7 @@ def login(request: Request, body: LoginInput, db: Session = Depends(get_db)):
 
     if not auth_service.verify_credentials(db, username=body.username, password=body.password):
         record_login_failure(ip)
-        # Mensaje genérico: nunca se distingue "el usuario no existe" de "la contraseña
-        # es incorrecta".
+        # Generic message: never distinguish "no such user" from "wrong password".
         return _error(
             status.HTTP_401_UNAUTHORIZED,
             "Usuario o contraseña incorrectos",
@@ -152,7 +150,7 @@ def login(request: Request, body: LoginInput, db: Session = Depends(get_db)):
 
 @router.post("/logout")
 def logout(request: Request):
-    """Público e idempotente: si la sesión ya caducó, cerrarla no debe dar 401."""
+    """Public and idempotent: closing an already expired session must not 401."""
     request.session.clear()
     return {"status": "ok"}
 
@@ -177,8 +175,8 @@ def change_credentials(request: Request, body: CredentialsInput, db: Session = D
             "setup_required",
         )
     except auth_service.InvalidCredentialsError:
-        # Misma bolsa de intentos que el login: acertar current_password es adivinar una
-        # contraseña, y darle cuota propia regalaría el doble de intentos.
+        # Same attempt budget as login: guessing current_password is guessing a
+        # password, and a separate quota would hand out twice the attempts.
         record_login_failure(ip)
         return _error(
             status.HTTP_401_UNAUTHORIZED,
@@ -190,14 +188,14 @@ def change_credentials(request: Request, body: CredentialsInput, db: Session = D
 
     auth_state.bump_token_version(row.token_version)
     clear_login_failures(ip)
-    # La sesión propia se re-emite con la versión nueva; las demás quedan invalidadas.
+    # Our own session is reissued on the new version; every other one is invalidated.
     _open_session(request, row)
     return AuthResultOut(username=row.username)
 
 
 @legacy_router.get("/login")
 def legacy_login_page():
-    """El login ya vive en la SPA. 302 y no 301: un 301 se cachea para siempre."""
+    """Login lives in the SPA now. 302, not 301: a 301 is cached forever."""
     return RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
 
 

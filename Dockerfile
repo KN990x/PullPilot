@@ -1,15 +1,12 @@
 FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
 
-# corepack installs exactly the pnpm declared in `packageManager`, so the image uses
-# the same version as local development and CI.
-# Node 24 is the LTS line and still bundles corepack; node 25 dropped it, which is why
-# base-image majors are pinned in .github/dependabot.yml.
+# corepack installs exactly the pnpm from `packageManager`, so image, CI and local
+# development agree. Node 25 dropped corepack — see the pins in .github/dependabot.yml.
 RUN corepack enable
 
 WORKDIR /app-web
 
-# Manifests only at first, so the dependency layer is cached and is not invalidated
-# every time the source code changes.
+# Manifests first so the dependency layer survives source changes.
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
 
 RUN pnpm install --frozen-lockfile
@@ -25,25 +22,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# The Docker CLI and the Compose plugin, copied from the official image instead of
-# apt's `docker.io` — that package drags in the whole engine (dockerd, containerd),
-# hundreds of MB that never run, because the work happens through the host's socket.
-# Copying also retires the hand-pinned `curl` download of the Compose plugin: its
-# version now moves with a base image that Dependabot already tracks.
+# Docker CLI and Compose plugin from the official image, not apt's `docker.io`: that
+# package drags in the whole engine (dockerd, containerd), which never runs here. It also
+# puts the Compose version under Dependabot instead of a hand-pinned curl.
 COPY --from=docker:28-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker:28-cli /usr/local/libexec/docker/cli-plugins/docker-compose \
      /usr/local/libexec/docker/cli-plugins/docker-compose
 
-# Build in a scratch directory and throw it away: the only copy of the code that survives
-# is the one pip installs. Before, `WORKDIR /app/server` + `uvicorn app:app` left TWO
-# copies in the image — `app` came from the copied tree and `server.*` from
-# site-packages — and STATIC_DIR existed only to paper over the difference.
+# Build in a scratch directory and throw it away, so the only surviving copy of the code
+# is the one pip installs. There used to be two, and a STATIC_DIR variable to tell them apart.
 WORKDIR /build
 
 COPY pyproject.toml .
 COPY server/ ./server
-# The Vite bundle goes inside the package (see [tool.setuptools.package-data]) so it
-# lands next to config.py's BASE_DIR and nothing has to be told where it is.
+# Inside the package (see [tool.setuptools.package-data]), next to config.py's BASE_DIR,
+# so nothing has to be told where the frontend is.
 COPY --from=frontend-builder /app-web/dist ./server/static
 
 RUN pip install --no-cache-dir . && rm -rf /build
@@ -53,10 +46,8 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-# /api/auth/status responde 200 en los tres estados (sin configurar, sin sesión y con
-# sesión), así que no hace falta aceptar un 401 como "sano" — que enmascararía cualquier
-# fallo real de autenticación. Se usa python en vez de curl para no instalar un paquete
-# más solo para esto.
+# /api/auth/status answers 200 in all three states (unconfigured, no session, session), so
+# a 401 never has to count as healthy. python instead of curl: one less package.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/auth/status', timeout=4)"
 

@@ -1,15 +1,13 @@
-"""Exclusión mutua de las actualizaciones, por proyecto.
+"""Per-project mutual exclusion for updates.
 
-Actualizar un stack es `git pull` + `compose pull` + `down`/`stop` + `up -d`. Dos de esas
-secuencias solapadas sobre el mismo directorio se pisan: la segunda puede levantar
-contenedores mientras la primera los está bajando, y el rollback de una revierte el
-despliegue de la otra. Pasaba con un doble clic, con dos pestañas abiertas o con una
-actualización global corriendo a la vez que una individual.
+Updating a stack is `git pull` + `compose pull` + `down`/`stop` + `up -d`. Two of those
+overlapping on one directory fight each other: the second brings containers up while the
+first is taking them down, and one rollback reverts the other deploy. A double click or
+two open tabs was enough.
 
-En proceso y con `Lock` de `threading` porque ahí es donde ocurre: los endpoints corren en
-el threadpool de FastAPI y el scheduler en su propio hilo, todo dentro del mismo proceso.
-Con varios workers de uvicorn esto no bastaría, pero ese escenario ya está desaconsejado
-por el propio scheduler (ver README).
+`threading.Lock` because that is where it happens: endpoints run in FastAPI's threadpool
+and the scheduler in its own thread, all in one process. More than one uvicorn worker
+would defeat this, and is already discouraged for the scheduler's sake (see README).
 """
 
 from __future__ import annotations
@@ -32,7 +30,7 @@ def _lock_for(name: str) -> threading.Lock:
 
 
 class ProjectBusyError(Exception):
-    """Ya hay una actualización en curso para ese proyecto."""
+    """An update is already running for that project."""
 
     def __init__(self, name: str) -> None:
         super().__init__(name)
@@ -41,11 +39,10 @@ class ProjectBusyError(Exception):
 
 @contextmanager
 def project_update_slot(name: str) -> Iterator[None]:
-    """Toma el turno del proyecto o lanza ProjectBusyError.
+    """Take the project's slot or raise ProjectBusyError.
 
-    No bloquea a propósito: si ya hay una actualización en marcha, quien llega después
-    tiene que enterarse (409 en la API, línea en el log del scheduler), no quedarse
-    esperando a que termine para lanzar otra igual detrás.
+    Non-blocking on purpose: whoever arrives second should be told (409, or a line in the
+    scheduler log), not queue up to run the very same update again straight after.
     """
     lock = _lock_for(name)
     if not lock.acquire(blocking=False):
@@ -57,7 +54,7 @@ def project_update_slot(name: str) -> Iterator[None]:
 
 
 def is_busy(name: str) -> bool:
-    """Solo informativo: entre esta llamada y un acquire puede cambiar."""
+    """Informational only: it can change between this call and an acquire."""
     return _lock_for(name).locked()
 
 

@@ -1,8 +1,7 @@
-"""Caché en proceso del estado de autenticación.
+"""In-process cache of the authentication state.
 
-El middleware corre en cada petición: no puede abrir una sesión de base de datos solo
-para preguntar si ya hay credenciales. Aquí se guarda la respuesta y solo la invalidan
-los endpoints que la cambian.
+The middleware runs on every request and cannot open a database session just to ask
+whether credentials exist. Only the endpoints that change it invalidate this.
 """
 
 from __future__ import annotations
@@ -11,9 +10,8 @@ import threading
 import time
 from dataclasses import dataclass
 
-# Mientras no hay credenciales se reconsulta la base de datos como mucho cada N segundos.
-# Es lo que hace correcto el caso de varios workers: el que no atendió el asistente se
-# entera enseguida. Una vez configurado ya no se vuelve a consultar nunca.
+# While there are no credentials the database is re-checked at most every N seconds, so a
+# worker that did not serve the wizard finds out quickly. Once configured, never again.
 NEGATIVE_TTL_SEC = 5.0
 
 
@@ -30,8 +28,8 @@ _checked_at: float = 0.0
 
 
 def _load_from_db() -> tuple[bool, int]:
-    # Import diferido: server.database importa server.config, y este módulo lo cargan
-    # tanto la app como los tests antes de que exista el esquema.
+    # Deferred import: server.database imports server.config, and both the app and the
+    # tests load this module before the schema exists.
     from server.database import session_scope
     from server.services.auth import get_credentials
 
@@ -39,7 +37,7 @@ def _load_from_db() -> tuple[bool, int]:
         with session_scope() as db:
             row = get_credentials(db)
             return (row is not None, row.token_version if row else 0)
-    except Exception:  # noqa: BLE001 - la tabla puede no existir todavía
+    except Exception:  # noqa: BLE001 - the table may not exist yet
         return (False, 0)
 
 
@@ -54,8 +52,8 @@ def get_snapshot() -> AuthSnapshot:
     if configured is None or (configured is False and stale):
         loaded, version = _load_from_db()
         with _lock:
-            # Otro hilo pudo completar el asistente mientras consultábamos: un True ya
-            # cacheado nunca se degrada a False.
+            # Another thread may have completed the wizard while we queried: a cached
+            # True never degrades back to False.
             if not _configured:
                 _configured = loaded
                 _token_version = version
@@ -67,7 +65,7 @@ def get_snapshot() -> AuthSnapshot:
 
 
 def prime(*, configured: bool, token_version: int) -> None:
-    """Fija el estado conocido al arrancar, para no consultar en la primera petición."""
+    """Set the known state at startup, so the first request does not have to query."""
     global _configured, _token_version, _checked_at
     with _lock:
         _configured = configured
@@ -76,17 +74,17 @@ def prime(*, configured: bool, token_version: int) -> None:
 
 
 def mark_configured(*, token_version: int) -> None:
-    """El asistente acaba de crear las credenciales."""
+    """The wizard has just created the credentials."""
     prime(configured=True, token_version=token_version)
 
 
 def bump_token_version(version: int) -> None:
-    """Las credenciales cambiaron: las sesiones con la versión anterior dejan de valer."""
+    """Credentials changed: sessions on the previous version stop being valid."""
     prime(configured=True, token_version=version)
 
 
 def reset_for_tests() -> None:
-    """Vuelve al estado recién importado."""
+    """Back to the freshly imported state."""
     global _configured, _token_version, _checked_at
     with _lock:
         _configured = None

@@ -1,8 +1,8 @@
-"""Política de usuario y contraseña.
+"""Username and password policy.
 
-Módulo sin dependencias a propósito: lo necesitan tanto el servicio (que valida de
-verdad) como los esquemas de Pydantic (que rechazan pronto), y cualquiera de los dos
-importando al otro cierra un ciclo a través de server.models.
+Dependency-free on purpose: both the service (which really validates) and the Pydantic
+schemas (which reject early) need it, and either importing the other closes a cycle
+through server.models.
 """
 
 from __future__ import annotations

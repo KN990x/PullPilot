@@ -293,7 +293,7 @@ def test_update_project_failure_hides_internal_logs_in_http_detail(
 def test_validate_startup_does_not_require_anything(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sin credenciales el arranque sigue adelante: las crea el asistente por UI."""
+    """With no credentials the startup carries on: the wizard creates them."""
     import server.config as cfg
 
     monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "file")
@@ -303,7 +303,7 @@ def test_validate_startup_does_not_require_anything(
 def test_validate_startup_warns_on_an_ephemeral_secret(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Volumen no escribible: se arranca igual, pero las sesiones no sobreviven."""
+    """Unwritable volume: it still boots, but sessions do not survive a restart."""
     import server.config as cfg
 
     monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "ephemeral")

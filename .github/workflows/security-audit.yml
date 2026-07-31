@@ -1,10 +1,6 @@
-# Dependency auditing.
-#
-# Design note: this workflow is an ALARM, not a merge gate — that is ci.yml, and it is
-# the only check on a pull request. So this one never runs on `push` or `pull_request`:
-# it used to, it stayed red on main for weeks, and every Dependabot PR was born with a ✗
-# that nobody could clear. A weekly run plus a manual trigger gives the same signal
-# without decorating every PR with it.
+# Dependency auditing. An alarm, not a merge gate — that is ci.yml. It never runs on
+# `push` or `pull_request`: it used to, stayed red on main for weeks, and every Dependabot
+# PR was born with a ✗ nobody could clear.
 name: Security audit
 
 on:
@@ -50,8 +46,8 @@ jobs:
             echo "### pip-audit"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          # `|| status=$?` is required: the default shell runs with `-e`, so a failing
-          # pip-audit would abort the script before the markdown block is closed.
+          # `|| status=$?` is required: with `-e`, a failing pip-audit would abort before
+          # the markdown block is closed.
           set -o pipefail
           status=0
           pip-audit -r /tmp/audit-req.txt 2>&1 | tee -a "$GITHUB_STEP_SUMMARY" || status=$?
@@ -95,10 +91,8 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-      # Informational: build tooling (eslint, vite, workbox…) is never deployed.
-      # Advisories with over-broad ranges also produce false positives here: for
-      # example GHSA-mh99-v99m-4gvg declares `<= 5.0.7` for brace-expansion, which
-      # sweeps in the 1.x and 2.x maintenance lines that are in fact patched.
+      # Informational: build tooling is never deployed, and over-broad advisory ranges
+      # produce false positives here (e.g. GHSA-mh99-v99m-4gvg on brace-expansion).
       - name: Audit full tree (informational)
         working-directory: web
         continue-on-error: true

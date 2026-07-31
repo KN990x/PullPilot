@@ -8,14 +8,14 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - pullpilot_data:/app/data
-      # Misma ruta en el host y dentro del contenedor: es lo que permite que los
-      # `docker compose` que lanza PullPilot encuentren los stacks donde el host los tiene.
-      # DOCKER_ROOT_PATH es el nombre antiguo y se sigue aceptando.
+      # Same path on the host and in the container, so the `docker compose` calls
+      # PullPilot makes find the stacks where the host keeps them. DOCKER_ROOT_PATH is the
+      # old name and is still accepted.
       - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
     environment:
       TZ: ${TZ:-UTC}
       STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
-      # Solo si hay un proxy inverso delante, p. ej. https://pullpilot.example.com
+      # Only behind a reverse proxy, e.g. https://pullpilot.example.com
       PUBLIC_URL: ${PUBLIC_URL:-}
 
 volumes:

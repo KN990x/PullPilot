@@ -1,9 +1,9 @@
 import { Coffee } from "lucide-react";
 
 /**
- * Footer portado de la demo de la web (`.pp-footer` / `.pp-coffee`): el enlace de
- * "invítame un café" deja de ser la píldora amarilla de Buy Me a Coffee y pasa a la
- * misma familia de pills azules que las acciones de la cabecera, rellenándose en hover.
+ * Ported from the site demo (`.pp-footer` / `.pp-coffee`): the "buy me a coffee" link
+ * uses the same blue pill family as the header actions instead of the Buy Me a Coffee
+ * yellow.
  */
 export default function Footer({ t }) {
   return (

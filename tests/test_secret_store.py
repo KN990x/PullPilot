@@ -33,7 +33,7 @@ def test_env_value_wins_and_writes_nothing(tmp_path: Path) -> None:
 
 
 def test_truncated_file_is_replaced(tmp_path: Path) -> None:
-    """Un fichero a medio escribir por otro worker no puede firmar sesiones."""
+    """A file another worker is halfway through writing must not sign sessions."""
     path = tmp_path / SECRET_FILENAME
     path.write_text("corto", encoding="utf-8")
 
@@ -44,7 +44,7 @@ def test_truncated_file_is_replaced(tmp_path: Path) -> None:
 
 
 def test_read_only_directory_degrades_to_ephemeral(tmp_path: Path) -> None:
-    """Con el volumen mal montado la app arranca igual, solo pierde las sesiones."""
+    """A badly mounted volume still boots; it only loses sessions on restart."""
     target = tmp_path / "ro"
     target.mkdir()
     target.chmod(0o500)

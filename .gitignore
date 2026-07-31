@@ -1,4 +1,4 @@
-# Secrets and local config — MUST NEVER be committed (they hold AUTH_PASS / SESSION_SECRET)
+# Secrets and local config — MUST NEVER be committed
 .env
 .env.*
 !.env.example
@@ -20,8 +20,8 @@ env/
 # Node / frontend
 node_modules/
 web/dist/
-# Bundle de Vite dentro del paquete: lo genera el build de Docker (y quien quiera probar
-# el fallback 404 -> SPA en local copiando web/dist aquí).
+# Vite bundle inside the package: produced by the Docker build, or by copying web/dist
+# here to exercise the 404 -> SPA fallback locally.
 server/static/
 web/build/
 web/coverage/
@@ -35,7 +35,7 @@ yarn.lock
 # Runtime data
 data/
 server/data/
-# DATA_DIR de `make dev-server`: base de datos y secreto de sesión locales.
+# DATA_DIR for `make dev-server`: local database and session secret.
 .devdata/
 *.db
 *.sqlite
@@ -43,7 +43,7 @@ server/data/
 pullpilot.db
 session_secret.key
 
-# Local agent instructions: not part of the project
+# Local agent instructions, not part of the project
 AGENTS.md
 CLAUDE.md
 

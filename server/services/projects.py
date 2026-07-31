@@ -22,7 +22,7 @@ def _resolved_projects_root() -> Path:
 
 
 def resolve_allowed_project_workdir(raw: str, *, locale: str = "es") -> Path:
-    """Resuelve la ruta del stack y comprueba que quede bajo PROJECTS_ROOT."""
+    """Resolve the stack path and check it stays under the stacks root."""
     root = _resolved_projects_root()
     candidate = Path(raw).expanduser()
     try:
@@ -37,7 +37,7 @@ def resolve_allowed_project_workdir(raw: str, *, locale: str = "es") -> Path:
 
 
 def compose_stack_allowed(path: Path) -> bool:
-    """True si el directorio es un stack compose válido y está bajo PROJECTS_ROOT."""
+    """True if the directory is a valid compose stack under the stacks root."""
     try:
         resolved = path.expanduser().resolve()
         resolved.relative_to(_resolved_projects_root())
@@ -51,7 +51,7 @@ def _dir_has_compose_file(path: Path) -> bool:
 
 
 def compose_project_path_ok(path: Path) -> bool:
-    """Directorio existente con docker-compose.yml o .yaml (mismo criterio que el escaneo)."""
+    """An existing directory with docker-compose.yml or .yaml, same rule as the scan."""
     return path.is_dir() and _dir_has_compose_file(path)
 
 

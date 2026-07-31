@@ -10,8 +10,8 @@ export default defineConfig({
       includeAssets: ["assets/logo.png"],
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
-        // El login ya vive dentro de la SPA, así que el service worker debe servirle el
-        // shell. Lo único que nunca puede resolver con el shell es una llamada a la API.
+        // Login lives in the SPA, so the service worker serves it the shell. The only
+        // thing the shell can never answer is an API call.
         navigateFallbackDenylist: [/^\/api\//],
       },
       manifest: {

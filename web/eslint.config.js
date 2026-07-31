@@ -6,9 +6,8 @@ import reactRefresh from "eslint-plugin-react-refresh";
 export default [
   { ignores: ["dist"] },
   js.configs.recommended,
-  // Ojo con el preset: `configs["recommended-latest"]` sigue siendo el formato eslintrc
-  // (con `plugins` como array de strings) y eslint 10 lo rechaza. El de flat config vive
-  // bajo `configs.flat`, y es un objeto, no un array: se pasa tal cual, sin spread.
+  // Mind the preset: `configs["recommended-latest"]` is still eslintrc format and eslint
+  // 10 rejects it. The flat one lives under `configs.flat` and is an object, not an array.
   reactHooks.configs.flat["recommended-latest"],
   {
     files: ["**/*.{js,jsx}"],
@@ -25,12 +24,10 @@ export default [
     },
     rules: {
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
-      // El preset de la v7 trae además el juego de reglas del React Compiler. Aquí no se
-      // usa el compilador (React 18 a pelo), y estas dos rechazan código idiomático:
-      //   set-state-in-effect -> el "carga los datos al montar" de App.jsx,
-      //   immutability        -> el useCallback que se reprograma a sí mismo (checkProgress).
-      // Lo que de verdad protegía antes (rules-of-hooks y exhaustive-deps) sigue activo.
-      // Reactivarlas exige rehacer el ciclo de polling; no es parte de este cambio.
+      // The v7 preset also brings the React Compiler rules. This is plain React 18, and
+      // these two reject idiomatic code: App.jsx's fetch-on-mount and the useCallback that
+      // reschedules itself. rules-of-hooks and exhaustive-deps stay on. Turning them back
+      // on means rewriting the polling cycle.
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/immutability": "off",
     },

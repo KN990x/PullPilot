@@ -1,10 +1,10 @@
 export const API_URL = "/api";
-// Centinela interno del frontend: lo lanza handleAuthError para que los `catch` sepan
-// que la redirección ya está en marcha y no muestren un error encima.
+// Internal sentinel: handleAuthError throws it so `catch` blocks know the redirect is
+// already under way and do not stack an error on top.
 export const SESSION_EXPIRED_ERROR = "Sesión expirada";
 export const SETUP_REQUIRED_ERROR = "Configuración inicial pendiente";
 
-/** Normaliza a es | en (alineado con el backend). */
+/** Normalise to es | en, matching the backend. */
 export function normalizeUiLocale(lang) {
   if (lang == null || typeof lang !== "string") {
     return "es";
@@ -28,7 +28,7 @@ function projectSegment(name) {
   return encodeURIComponent(name);
 }
 
-/** Lee el `code` del cuerpo de un 401 sin consumir el body original del llamador. */
+/** Read a 401's `code` without consuming the caller's body. */
 async function peekErrorCode(response) {
   try {
     const data = await response.clone().json();
@@ -41,8 +41,7 @@ async function peekErrorCode(response) {
 export async function handleAuthError(response, options = {}) {
   if (response.status === 401) {
     const code = await peekErrorCode(response);
-    // Alguien vació la base de datos con la pestaña abierta: hay que volver al
-    // asistente, no a la pantalla de login.
+    // The database was emptied with the tab open: back to the wizard, not to login.
     if (code === "setup_required") {
       if (typeof options.onSetupRequired === "function") {
         options.onSetupRequired();
@@ -75,8 +74,8 @@ async function request(path, options = {}, context = {}) {
 }
 
 /**
- * Igual que `request` pero sin el manejador global de 401: en los endpoints de
- * autenticación un 401 significa "credenciales incorrectas", no "sesión caducada".
+ * Like `request` but without the global 401 handler: on the auth endpoints a 401 means
+ * "wrong credentials", not "session expired".
  */
 async function publicRequestJson(path, options = {}, context = {}) {
   const response = await fetch(`${API_URL}${path}`, {
@@ -130,8 +129,8 @@ async function assertOk(response) {
       throw err instanceof Error ? err : new Error(String(err));
     }
     const error = new Error(errorMessageFromBody(data, response.status));
-    // `code` es el slug estable del backend; es lo que elige la clave de i18n en los
-    // formularios de autenticación. El mensaje queda para curl y para la consola.
+    // `code` is the backend's stable slug and picks the i18n key in the auth forms.
+    // The message is for curl and the console.
     error.status = response.status;
     if (data && typeof data === "object") {
       error.code = data.code;

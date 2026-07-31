@@ -23,7 +23,7 @@ def test_hash_round_trip() -> None:
 
 
 def test_same_password_produces_different_hashes() -> None:
-    """Sal aleatoria: dos instalaciones con la misma contraseña no comparten hash."""
+    """Random salt: two installs with the same password do not share a hash."""
     assert auth_service.hash_password("supersecreta") != auth_service.hash_password("supersecreta")
 
 
@@ -35,7 +35,7 @@ def test_same_password_produces_different_hashes() -> None:
         "scrypt$x$8$1$YQ==$Yg==",
         "bcrypt$16384$8$1$YQ==$Yg==",
         "scrypt$16384$8$1$no-es-base64!$Yg==",
-        # n desorbitado: sin la cota, verificar sería una bomba de memoria.
+        # Absurd n: without the bound, verifying would be a memory bomb.
         "scrypt$1099511627776$8$1$YQ==$Yg==",
     ],
 )
@@ -44,7 +44,7 @@ def test_corrupt_hash_is_rejected_without_raising(stored: str) -> None:
 
 
 def test_verify_honours_parameters_stored_in_the_hash() -> None:
-    """Un hash antiguo con parámetros más flojos sigue validando."""
+    """An old hash with weaker parameters still verifies."""
     stored = auth_service.hash_password("supersecreta", n=2**13)
 
     assert int(stored.split("$")[1]) == 2**13
@@ -141,7 +141,7 @@ def test_change_credentials_without_setup(db_session: Session) -> None:
 
 
 def test_credentials_cannot_be_created_twice(db_session: Session) -> None:
-    """La base de datos manda: no hay ninguna otra vía para crear o pisar la fila."""
+    """The database rules: there is no other way to create or overwrite the row."""
     auth_service.create_initial_credentials(db_session, username="admin", password="supersecreta")
 
     with pytest.raises(auth_service.SetupAlreadyCompletedError):

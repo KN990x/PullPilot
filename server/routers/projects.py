@@ -57,9 +57,8 @@ async def get_projects():
 @router.post("/projects/{name}/update")
 async def update_project(name: str, locale: str = Depends(get_request_locale)):
     def work(db: Session):
-        # El turno se toma antes que nada: dos peticiones a la vez sobre el mismo stack
-        # (doble clic, dos pestañas, o una actualización global en curso) se solapaban
-        # bajando y levantando los mismos contenedores.
+        # Take the slot first: two requests on the same stack used to overlap, taking
+        # the same containers down and up at once.
         try:
             with project_update_slot(name):
                 return _run_update(name, db, locale)

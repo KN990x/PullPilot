@@ -1,19 +1,14 @@
 /**
- * Pill de accion para la cabecera y para las pantallas de login/setup.
+ * Action pill for the header and the login/setup screens.
  *
- * El diseño viene de la demo de la web (`.pp-lang` y `.pp-logout`): borde de 1px,
- * radio de 10px y fondo teñido con el color semantico de la accion, en lugar del
- * icono plano sin fondo que habia antes. Se comparte en un componente porque el
- * ambar del selector de idioma no existe en la paleta de Tailwind y no interesa
- * repetir esos valores arbitrarios en dos ficheros.
- *
- * La variante `account` no tiene equivalente en la demo, que es una maqueta sin
- * sesion: usa el azul de marca que ya marca la pestaña activa, para que la terna
- * se lea como una familia.
+ * Design from the site demo (`.pp-lang`, `.pp-logout`): 1px border, 10px radius, tinted
+ * with the action's semantic colour. It is one shared component because the language
+ * switch's amber is not in the Tailwind palette and those arbitrary values should not be
+ * repeated in two files. The `account` variant has no demo equivalent and reuses the brand
+ * blue of the active tab so the three read as a family.
  */
 
-// El padding compacto es el que la demo aplica por debajo de 900px; a partir de
-// `sm` se recupera el de la referencia (9px 14px).
+// Compact padding is what the demo uses below 900px; from `sm` up, 9px 14px.
 const BASE =
   "inline-flex items-center gap-[7px] px-2.5 py-2 sm:px-3.5 sm:py-[9px] rounded-[10px] border text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600";
 

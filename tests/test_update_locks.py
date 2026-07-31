@@ -1,8 +1,8 @@
-"""Dos actualizaciones a la vez sobre el mismo stack se pisan.
+"""Two updates at once on the same stack fight each other.
 
-`update_single_project_logic` lanza `compose down`/`stop` y luego `up -d`. Solapadas, la
-segunda puede levantar contenedores mientras la primera los baja, y el rollback de una
-revierte el despliegue de la otra. Basta un doble clic o dos pestañas abiertas.
+`update_single_project_logic` runs `compose down`/`stop` and then `up -d`. Overlapping, the
+second brings containers up while the first takes them down, and one rollback reverts the
+other deploy. A double click or two open tabs is enough.
 """
 
 import threading
@@ -27,7 +27,7 @@ def test_slot_is_exclusive_per_project() -> None:
         with pytest.raises(locks.ProjectBusyError):
             with locks.project_update_slot("plex"):
                 pass
-        # Otro proyecto no comparte turno.
+        # A different project has its own slot.
         with locks.project_update_slot("pihole"):
             pass
 
@@ -53,8 +53,8 @@ def test_second_concurrent_update_gets_409(
         release.wait(timeout=5)
         return True, ["ok"]
 
-    # Se parchea en el router y no en el módulo de origen: projects.py fija el nombre al
-    # importar (trampa 1 de AGENTS.md).
+    # Patched on the router, not the source module: projects.py binds the name at import
+    # time (pitfall 1 in AGENTS.md).
     monkeypatch.setattr(
         projects_router_module, "update_single_project_logic", _blocking_update
     )
@@ -67,7 +67,7 @@ def test_second_concurrent_update_gets_409(
     worker = threading.Thread(target=_run_first)
     worker.start()
     try:
-        assert started.wait(timeout=5), "la primera actualizacion no llego a arrancar"
+        assert started.wait(timeout=5), "the first update never started"
         second = client.post("/api/projects/plex/update")
     finally:
         release.set()

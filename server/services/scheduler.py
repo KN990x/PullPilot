@@ -28,7 +28,7 @@ scheduler = BackgroundScheduler()
 
 
 def snapshot_global_update_status() -> dict[str, object]:
-    """Copia defensiva para lectores HTTP (evita compartir la lista `processed` con el job)."""
+    """Defensive copy for HTTP readers: never share the live `processed` list."""
     s = global_update_status
     processed = s.get("processed")
     if isinstance(processed, list):
@@ -48,7 +48,7 @@ global_update_lock = Lock()
 
 
 def build_trigger(task_type: str, expression: str) -> CronTrigger | DateTrigger:
-    """Construye un trigger de APScheduler; lanza ValueError si la expresion no es valida."""
+    """Build an APScheduler trigger. ValueError if the expression is not valid."""
     expr = (expression or "").strip()
     if task_type == "cron":
         if not expr:
@@ -106,8 +106,8 @@ def global_update_job(locale: str | None = None) -> None:
                 time.sleep(2)
 
             try:
-                # Mismo turno que usa la API: si el usuario ya está actualizando ese
-                # stack a mano, la tarea global no se mete en medio.
+                # Same slot the API takes: a manual update in flight is not interrupted
+                # by the global job.
                 with project_update_slot(project.name):
                     success, logs = update_single_project_logic(
                         project.name, db, locale=loc

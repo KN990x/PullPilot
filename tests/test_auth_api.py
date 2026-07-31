@@ -69,7 +69,7 @@ def test_setup_rejects_mismatched_passwords(auth_client: TestClient) -> None:
 
 
 def test_validation_error_does_not_echo_the_password(auth_client: TestClient) -> None:
-    """Pydantic devuelve el valor rechazado en `input`; bajo /api/auth eso sería la contraseña."""
+    """Pydantic echoes the rejected value in `input`; under /api/auth that is the password."""
     response = auth_client.post(
         "/api/auth/setup",
         json={"username": SETUP_USERNAME, "password": "corta", "password_confirm": "corta"},
@@ -89,7 +89,7 @@ def test_login_with_wrong_password(logged_in_client: TestClient) -> None:
 
     assert response.status_code == 401
     assert response.json()["code"] == "invalid_credentials"
-    # Nunca se distingue "el usuario no existe" de "la contraseña es incorrecta".
+    # Never distinguish "no such user" from "wrong password".
     assert SETUP_USERNAME not in response.json()["detail"]
 
 
@@ -106,7 +106,7 @@ def test_login_and_logout_round_trip(logged_in_client: TestClient) -> None:
 
 
 def test_logout_is_idempotent(auth_client: TestClient) -> None:
-    """Con la sesión ya caducada, cerrar sesión no debe dar 401."""
+    """Logging out of an already expired session must not 401."""
     assert auth_client.post("/api/auth/logout").status_code == 200
     assert auth_client.post("/api/auth/logout").status_code == 200
 
@@ -161,7 +161,7 @@ def test_change_password_switches_the_valid_credentials(logged_in_client: TestCl
         },
     )
     assert response.status_code == 200
-    # La sesión propia se re-emite, así que sigue funcionando.
+    # Our own session is reissued, so it keeps working.
     assert logged_in_client.get("/api/projects").status_code == 200
 
     logged_in_client.post("/api/auth/logout")
@@ -234,7 +234,7 @@ def test_change_credentials_requires_session(auth_client: TestClient) -> None:
 
 
 def test_legacy_login_redirects_to_the_spa(auth_client: TestClient) -> None:
-    """Las PWA instaladas con el bundle viejo hacen location.replace('/login')."""
+    """PWAs installed on the old bundle still do location.replace('/login')."""
     response = auth_client.get("/login", follow_redirects=False)
 
     assert response.status_code == 302

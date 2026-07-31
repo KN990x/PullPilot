@@ -1,10 +1,9 @@
-"""El fallback de la SPA no debe tragarse los 404 de la API.
+"""The SPA fallback must not swallow the API's 404s.
 
-Esto no lo veía ningún test: `server/static` solo existe dentro de la imagen, así que en
-desarrollo el handler ni se registraba. En producción sí, y ahí `DELETE /api/schedules/9999`
-respondía 200 + index.html — el frontend comprueba `response.ok` y daba por bueno un
-borrado que nunca ocurrió. Por eso aquí se monta un directorio estático de mentira: es la
-única forma de ejercitar la rama que de verdad corre en la imagen publicada.
+No test saw this: `server/static` only exists inside the image, so in development the
+handler was never even registered. In production it was, and `DELETE /api/schedules/9999`
+answered 200 + index.html — the frontend checks `response.ok` and took a delete that never
+happened as done. Hence the fake static directory here.
 """
 
 import pytest
@@ -32,13 +31,12 @@ def spa_client(tmp_path) -> TestClient:
     def projects():
         return []
 
-    # Ruta fuera de /api que sí puede responder 404: sirve para comprobar que el shell
-    # solo se sirve en navegaciones (GET/HEAD).
+    # A non-/api route that can 404, to check the shell is only served on GET/HEAD.
     @app.post("/logout")
     def legacy_logout():
         raise HTTPException(status_code=404, detail="Ya no existe")
 
-    # Igual que en server/app.py: el montaje va después de las rutas.
+    # Same as server/app.py: the mount goes after the routes.
     register_spa_fallback(app, static_dir)
     return TestClient(app)
 
@@ -58,7 +56,7 @@ def test_unknown_api_route_is_404_not_the_spa(spa_client: TestClient) -> None:
 
 
 def test_non_get_404_does_not_get_the_shell(spa_client: TestClient) -> None:
-    """Un POST no es navegación: aunque acabe en 404, no le toca el shell de la SPA."""
+    """A POST is not navigation: even on a 404 it does not get the SPA shell."""
     response = spa_client.post("/logout")
 
     assert response.status_code == 404
@@ -66,7 +64,7 @@ def test_non_get_404_does_not_get_the_shell(spa_client: TestClient) -> None:
 
 
 def test_post_to_an_unknown_path_never_returns_the_shell(spa_client: TestClient) -> None:
-    """StaticFiles contesta 405 antes de llegar al handler; lo que importa es que no es el shell."""
+    """StaticFiles answers 405 before the handler; what matters is it is not the shell."""
     response = spa_client.post("/lo-que-sea")
 
     assert response.status_code in (404, 405)

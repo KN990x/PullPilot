@@ -42,14 +42,13 @@ const DEFAULT_PROGRESS = {
   current_project: "",
 };
 
-// El modo demo es una herramienta de desarrollo: permite ver la interfaz sin levantar el
-// backend. En la build publicada estaba activo y saltaba ante CUALQUIER fallo de red, así
-// que mientras PullPilot recreaba su propio contenedor el usuario veía un panel lleno de
-// proyectos inventados. Vite evalúa esto en tiempo de compilación y elimina del bundle de
-// producción todo lo que cuelga de la condición, mockData.js incluido.
+// Demo mode is a development tool. It used to be live in the published build and fired on
+// ANY network error, so while PullPilot recreated its own container the user saw a panel
+// full of invented projects. Vite resolves this at build time and drops everything behind
+// it, mockData.js included, from the production bundle.
 const MOCK_MODE_ALLOWED = import.meta.env.DEV;
 
-/** Traduce el `code` estable del backend a una clave de i18n. */
+/** Maps the backend's stable `code` to an i18n key. */
 const ERROR_KEYS = {
   invalid_credentials: "auth.invalid_credentials",
   invalid_current_password: "account.error_current_password",
@@ -84,8 +83,8 @@ export default function App() {
   const [selectedFreq, setSelectedFreq] = useState("daily");
   const [progress, setProgress] = useState(DEFAULT_PROGRESS);
 
-  // loading | setup | login | ready. La SPA ya no redirige al servidor para autenticar:
-  // consulta /api/auth/status y decide qué pintar.
+  // loading | setup | login | ready | offline. The SPA never redirects to authenticate:
+  // it asks /api/auth/status and decides what to draw.
   const [authState, setAuthState] = useState("loading");
   const [authUsername, setAuthUsername] = useState(null);
   const [authError, setAuthError] = useState(null);
@@ -128,17 +127,16 @@ export default function App() {
       }
       if (isBackendUnreachableError(error)) {
         if (MOCK_MODE_ALLOWED) {
-          console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
+          console.warn("Backend unreachable, loading mock data.", error);
           setProjects(MOCK_PROJECTS);
           setIsMockMode(true);
           return;
         }
-        // Se está actualizando o se ha caído: la pantalla de "sin conexión" con reintento
-        // es honesta; datos falsos, no.
+        // Updating or down. A retry screen is honest; fake data is not.
         setAuthState("offline");
         return;
       }
-      console.error("Error cargando proyectos", error);
+      console.error("Error loading projects", error);
       setProjects([]);
       setIsMockMode(false);
       alert(t("alerts.projects_load_error"));
@@ -163,7 +161,7 @@ export default function App() {
           setAuthState("offline");
           return;
         }
-        console.error("Error cargando historial", error);
+        console.error("Error loading history", error);
         setHistory([]);
         alert(t("alerts.history_load_error"));
       } finally {
@@ -218,7 +216,7 @@ export default function App() {
     } catch (error) {
       if (isBackendUnreachableError(error)) {
         if (MOCK_MODE_ALLOWED) {
-          console.warn("Backend no detectado. Cargando datos de prueba (mock mode).", error);
+          console.warn("Backend unreachable, loading mock data.", error);
           setIsMockMode(true);
           setAuthState("ready");
           return;
@@ -226,11 +224,10 @@ export default function App() {
         setAuthState("offline");
         return;
       }
-      console.error("Error consultando el estado de autenticación", error);
+      console.error("Error checking authentication status", error);
       setAuthState("login");
     }
-    // i18n.language solo alimenta la cabecera Accept-Language; no hace falta re-ejecutar
-    // el bootstrap al cambiar de idioma.
+    // i18n.language only feeds Accept-Language: no need to re-run bootstrap on a switch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -244,8 +241,7 @@ export default function App() {
   }, [bootstrap]);
 
   useEffect(() => {
-    // Sin sesión no se piden datos: antes las cuatro llamadas salían siempre y las
-    // cuatro respondían 401.
+    // No session, no data: these four calls used to fire always and 401 four times.
     if (authState !== "ready") {
       return undefined;
     }
@@ -293,7 +289,7 @@ export default function App() {
       setAuthUsername(result.username);
       setAuthState("ready");
     } catch (error) {
-      console.error("Error en la configuración inicial", error);
+      console.error("Error during initial setup", error);
       setAuthError(authErrorMessage(error, t));
     } finally {
       setAuthSubmitting(false);
@@ -364,7 +360,7 @@ export default function App() {
         setAccountSuccess(false);
       }, 2500);
     } catch (error) {
-      console.error("Error cambiando las credenciales", error);
+      console.error("Error changing credentials", error);
       setAccountError(authErrorMessage(error, t));
     } finally {
       setAuthSubmitting(false);
@@ -545,9 +541,8 @@ export default function App() {
   };
 
   const toggleLanguage = () => {
-    // Normalizar antes de comparar: el detector del navegador devuelve "es-ES", que no
-    // es igual a "es", así que la primera pulsacion tras una carga limpia se quedaba en
-    // castellano en lugar de pasar a ingles.
+    // Normalise before comparing: the browser detector returns "es-ES", so the first
+    // click after a clean load used to stay on Spanish.
     const newLang = normalizeUiLocale(i18n.language) === "es" ? "en" : "es";
     i18n.changeLanguage(newLang);
   };
@@ -629,7 +624,7 @@ export default function App() {
         isMockMode={isMockMode}
         activeTab={activeTab}
         onChangeTab={setActiveTab}
-        // En modo demo no hay backend contra el que cambiar nada.
+        // Demo mode has no backend to change anything against.
         onOpenAccount={isMockMode ? undefined : () => setAccountOpen(true)}
         onToggleLanguage={toggleLanguage}
         onLogout={handleLogout}

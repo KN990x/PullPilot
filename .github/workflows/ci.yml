@@ -1,9 +1,6 @@
-# The repository's only merge gate: one job, one check.
-#
-# Design note: the real verification happens locally with `make lint` and `make test`
-# before committing (see AGENTS.md). This workflow mirrors those two commands and adds
-# the one thing a development machine may not have: a Docker build plus a cold-start
-# smoke test. Splitting it into five jobs only produced five checks to read.
+# The repository's only merge gate: one job, one check. Mirrors `make lint` + `make test`,
+# which is what actually runs before committing (see AGENTS.md), and adds the one thing a
+# development machine may lack: a Docker build and a cold-start smoke test.
 name: CI
 
 on:
@@ -29,8 +26,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # 3.11 and nothing else: it is what .python-version pins and what the
-      # python:3.11-slim image ships. Testing versions the image never runs was noise.
+      # 3.11 only: what .python-version pins and what the image ships.
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -42,7 +38,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      # The three steps below are exactly `make lint` (Python half) + `make test`.
       - name: Lint (ruff)
         run: ruff check server tests
 
@@ -52,8 +47,7 @@ jobs:
       - name: Tests
         run: python -m pytest tests/ -q
 
-      # No `version:`: pnpm/action-setup reads `packageManager` from web/package.json,
-      # so CI, Docker and local development all use exactly the same pnpm.
+      # No `version:`: the action reads `packageManager` from web/package.json.
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -79,8 +73,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # Single platform: this only checks that the multi-stage build compiles.
-      # The real multi-arch build lives in ghcr-publish.yml.
+      # Single platform: only checks the build compiles. Multi-arch is in ghcr-publish.yml.
       - name: Build image
         uses: docker/build-push-action@v7
         with:
@@ -94,8 +87,7 @@ jobs:
 
       - name: Smoke test (cold start + setup wizard)
         run: |
-          # Sin ninguna variable de auth: exactamente el arranque en frío que se lleva
-          # un usuario nuevo.
+          # No auth variables at all: exactly the cold start a new user gets.
           docker run -d --name pullpilot-ci -p 8000:8000 pullpilot:ci
 
           for _ in $(seq 1 30); do
@@ -112,7 +104,7 @@ jobs:
           echo "auth status: $(cat /tmp/status.json)"
           grep -q '"setup_complete":false' /tmp/status.json
 
-          # La API está cerrada hasta completar el asistente.
+          # The API stays closed until the wizard is done.
           code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/projects)
           [ "$code" = "401" ] || { echo "::error::/api/projects should be 401, got $code"; exit 1; }
 
@@ -125,18 +117,18 @@ jobs:
           code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/api/projects)
           [ "$code" = "200" ] || { echo "::error::/api/projects with session should be 200, got $code"; exit 1; }
 
-          # El fallback de la SPA no debe tragarse los 404 de la API (regresión conocida:
-          # devolvía index.html con status 200 y la UI daba el borrado por bueno).
+          # The SPA fallback must not swallow API 404s: it used to return index.html with
+          # status 200 and the UI took the delete as done.
           code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
             -b /tmp/cookies.txt http://127.0.0.1:8000/api/schedules/99999)
           [ "$code" = "404" ] || { echo "::error::/api/schedules/99999 should be 404, got $code"; exit 1; }
 
-          # …pero una ruta de navegación sí tiene que recibir el shell de la SPA.
+          # ...but a navigation route does have to get the SPA shell.
           code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/history)
           [ "$code" = "200" ] || { echo "::error::/history should serve the SPA shell, got $code"; exit 1; }
 
-          # docker compose tiene que existir dentro de la imagen: es lo que ejecuta cada
-          # actualización, y ahora viene del CLI oficial y no del paquete docker.io.
+          # docker compose has to exist in the image: it runs every update, and now comes
+          # from the official CLI rather than the docker.io package.
           docker exec pullpilot-ci docker compose version
 
           echo "Cold start, setup wizard, authenticated request and 404 handling all OK"
