@@ -1,31 +1,35 @@
+import { Coffee } from "lucide-react";
+
+/**
+ * Footer portado de la demo de la web (`.pp-footer` / `.pp-coffee`): el enlace de
+ * "invítame un café" deja de ser la píldora amarilla de Buy Me a Coffee y pasa a la
+ * misma familia de pills azules que las acciones de la cabecera, rellenándose en hover.
+ */
 export default function Footer({ t }) {
   return (
     <footer className="bg-white border-t border-slate-200 mt-auto">
-      <div className="max-w-7xl mx-auto px-6 py-6 md:py-8 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="text-slate-400 text-sm font-medium text-center md:text-left order-2 md:order-1">
-          <p>
-            &copy; {new Date().getFullYear()}{" "}
-            <a
-              href="https://github.com/KN990x"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-slate-600 font-semibold hover:underline underline-offset-2"
-            >
-              KN
-            </a>
-          </p>
-        </div>
-        <div className="flex flex-row flex-wrap justify-center items-center gap-4 md:gap-6 order-1 md:order-2">
+      <div className="max-w-7xl mx-auto px-6 py-[22px] flex flex-wrap justify-between items-center gap-[14px]">
+        <p className="text-[13px] font-medium text-slate-400">
+          &copy; {new Date().getFullYear()}{" "}
           <a
-            href="https://buymeacoffee.com/kn990x"
+            href="https://github.com/KN990x"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-1 rounded-full text-sm font-bold transition-all hover:opacity-90 hover:scale-105 active:scale-95 shadow-sm h-[28px] whitespace-nowrap text-black"
-            style={{ backgroundColor: "#FFDD00" }}
+            className="hover:underline"
           >
-            <span style={{ fontFamily: "inherit" }}>{t("footer.tip_me")}</span>
+            KN990x
           </a>
-        </div>
+        </p>
+
+        <a
+          href="https://buymeacoffee.com/kn990x"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-[7px] px-[15px] py-2 rounded-[10px] border border-blue-600/30 bg-blue-600/[0.08] text-blue-600 text-[13px] font-semibold transition-colors hover:bg-blue-600 hover:border-blue-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        >
+          <Coffee size={15} />
+          {t("footer.tip_me")}
+        </a>
       </div>
     </footer>
   );

@@ -1,5 +1,8 @@
 import { Languages, Loader2 } from "lucide-react";
 
+import { normalizeUiLocale } from "../lib/api";
+import HeaderButton from "./HeaderButton";
+
 export default function AuthLayout({
   t,
   i18n,
@@ -38,15 +41,16 @@ export default function AuthLayout({
         </div>
 
         <div className="flex justify-center mt-4">
-          <button
+          <HeaderButton
+            variant="lang"
+            icon={Languages}
+            label={t("app.change_language")}
             onClick={onToggleLanguage}
-            className="p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1"
-            title={t("app.change_language")}
-            aria-label={t("app.change_language")}
           >
-            <Languages size={20} />
-            <span className="text-xs font-bold">{i18n.language.toUpperCase()}</span>
-          </button>
+            <span className="text-xs font-bold">
+              {normalizeUiLocale(i18n.language).toUpperCase()}
+            </span>
+          </HeaderButton>
         </div>
       </div>
     </div>

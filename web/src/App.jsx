@@ -522,7 +522,10 @@ export default function App() {
   };
 
   const toggleLanguage = () => {
-    const newLang = i18n.language === "es" ? "en" : "es";
+    // Normalizar antes de comparar: el detector del navegador devuelve "es-ES", que no
+    // es igual a "es", así que la primera pulsacion tras una carga limpia se quedaba en
+    // castellano en lugar de pasar a ingles.
+    const newLang = normalizeUiLocale(i18n.language) === "es" ? "en" : "es";
     i18n.changeLanguage(newLang);
   };
 

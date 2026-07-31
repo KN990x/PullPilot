@@ -11,7 +11,7 @@ PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 # web/package.json, so `corepack pnpm` gives everyone the same pnpm.
 PNPM ?= corepack pnpm
 
-.PHONY: dev-server dev-server-open dev-web setup setup-web build up lint test
+.PHONY: dev dev-open dev-server dev-server-open dev-web setup setup-web build up lint test
 
 # Sets up the backend environment with the Python version from .python-version.
 setup:
@@ -37,6 +37,23 @@ dev-server-open:
 	DATA_DIR=.devdata ALLOW_NO_AUTH=true uvicorn server.app:app --reload
 
 dev-web:
+	cd web && $(PNPM) run dev
+
+# Backend y frontend a la vez en una sola terminal, que es lo que hace falta para ver la
+# interfaz: sin el backend detrás, el proxy de Vite responde 500 y la SPA se queda en la
+# pantalla de login. Abre http://localhost:5173.
+#
+# El trap mata el backend por su PID, no con `kill 0`: el supervisor de `--reload` gestiona
+# SIGINT por su cuenta y sobrevive al Ctrl+C de la terminal, dejando el 8000 ocupado.
+dev:
+	DATA_DIR=.devdata $(PY) -m uvicorn server.app:app --reload & \
+	API=$$!; trap "kill $$API 2>/dev/null" EXIT INT TERM; \
+	cd web && $(PNPM) run dev
+
+# Igual que dev pero saltándose el login, para entrar directo al panel.
+dev-open:
+	DATA_DIR=.devdata ALLOW_NO_AUTH=true $(PY) -m uvicorn server.app:app --reload & \
+	API=$$!; trap "kill $$API 2>/dev/null" EXIT INT TERM; \
 	cd web && $(PNPM) run dev
 
 build:
