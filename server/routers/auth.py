@@ -118,10 +118,12 @@ def setup(request: Request, body: SetupInput, db: Session = Depends(get_db)):
             "setup_already_completed",
         )
     except ValueError as exc:
-        record_login_failure(who)
+        # No record_login_failure here: this is the wizard rejecting a password that is
+        # too short, not someone guessing one. Charging it to the login budget locked the
+        # operator out of their own fresh install after 15 typos.
         return _error(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc), "validation_error")
 
-    auth_state.mark_configured(token_version=row.token_version)
+    auth_state.mark_configured(token_version=row.token_version, username=row.username)
     clear_login_failures(who)
     _open_session(request, row)
     return AuthResultOut(username=row.username)
@@ -193,7 +195,7 @@ def change_credentials(request: Request, body: CredentialsInput, db: Session = D
     except ValueError as exc:
         return _error(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc), "validation_error")
 
-    auth_state.bump_token_version(row.token_version)
+    auth_state.bump_token_version(row.token_version, username=row.username)
     clear_login_failures(who)
     # Our own session is reissued on the new version; every other one is invalidated.
     _open_session(request, row)

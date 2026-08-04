@@ -1,4 +1,5 @@
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
@@ -16,7 +17,6 @@ from server.services.locks import ProjectBusyError, project_update_slot
 from server.services.projects import compose_stack_allowed, update_single_project_logic
 from server.services.update_logs import persist_update_log
 
-
 global_update_status = {
     "is_running": False,
     "total": 0,
@@ -27,34 +27,58 @@ global_update_status = {
 
 scheduler = BackgroundScheduler()
 
+global_update_lock = Lock()
+# Guards the status dict above, which the job thread mutates while HTTP readers snapshot
+# it, and the remove-all-then-re-add in refresh_scheduler_jobs.
+_status_lock = Lock()
+_refresh_lock = Lock()
+
 
 def snapshot_global_update_status() -> dict[str, object]:
-    """Defensive copy for HTTP readers: never share the live `processed` list."""
-    s = global_update_status
-    processed = s.get("processed")
-    if isinstance(processed, list):
-        processed_copy: list[object] = list(processed)
-    else:
-        processed_copy = []
-    return {
-        "is_running": s["is_running"],
-        "total": s["total"],
-        "current": s["current"],
-        "current_project": s["current_project"],
-        "processed": processed_copy,
-    }
+    """Defensive copy for HTTP readers: never share the live `processed` list.
+
+    Under the lock as well as copied: the job thread mutates these fields between our
+    reads, which is how a snapshot could report `current` past `total`.
+    """
+    with _status_lock:
+        s = global_update_status
+        processed = s.get("processed")
+        if isinstance(processed, list):
+            processed_copy: list[object] = list(processed)
+        else:
+            processed_copy = []
+        return {
+            "is_running": s["is_running"],
+            "total": s["total"],
+            "current": s["current"],
+            "current_project": s["current_project"],
+            "processed": processed_copy,
+        }
 
 
-global_update_lock = Lock()
+def trigger_is_past(trigger: CronTrigger | DateTrigger) -> bool:
+    """True for a one-shot trigger whose moment has already gone.
+
+    APScheduler normalises `run_date` to an aware datetime, so comparing against UTC is
+    safe whatever timezone the expression carried.
+    """
+    run_date = getattr(trigger, "run_date", None)
+    return run_date is not None and run_date < datetime.now(UTC)
 
 
 def build_trigger(
-    task_type: str, expression: str, *, locale: str = "es"
+    task_type: str, expression: str, *, locale: str = "es", reject_past: bool = False
 ) -> CronTrigger | DateTrigger:
     """Build an APScheduler trigger. ValueError if the expression is not valid.
 
     Translated because the router hands these straight to the user as a 422 `detail`:
     they were the only messages in the schedules flow that skipped i18n.
+
+    `reject_past` is for the create endpoint only. APScheduler's default misfire grace is
+    one second, so a date already gone is dropped as a misfire: job_wrapper never runs,
+    retire_one_shot_task never marks the row inactive, and the UI lists it forever as
+    pending while every refresh re-registers it. Loading existing rows must not use it —
+    those get pruned instead.
     """
     expr = (expression or "").strip()
     if task_type == "cron":
@@ -77,9 +101,12 @@ def build_trigger(
         if not expr:
             raise ValueError(t("schedule.date_empty", locale))
         try:
-            return DateTrigger(run_date=expr)
+            trigger = DateTrigger(run_date=expr)
         except Exception as exc:
             raise ValueError(t("schedule.date_invalid", locale, exc=exc)) from exc
+        if reject_past and trigger_is_past(trigger):
+            raise ValueError(t("schedule.date_in_past", locale))
+        return trigger
     raise ValueError(t("schedule.unsupported_type", locale, task_type=task_type))
 
 
@@ -95,23 +122,26 @@ def global_update_job(locale: str | None = None) -> None:
     # for the rest of the process's life.
     db = None
     try:
-        global_update_status["is_running"] = True
-        global_update_status["processed"] = []
+        with _status_lock:
+            global_update_status["is_running"] = True
+            global_update_status["processed"] = []
         db = SessionLocal()
         logger.info("Iniciando tarea programada: Actualización Global Segura")
 
         rows = db.query(ProjectSettings).filter(ProjectSettings.excluded.is_(False)).all()
         projects = [p for p in rows if compose_stack_allowed(Path(p.path))]
-        global_update_status["total"] = len(projects)
-        global_update_status["current"] = 0
+        with _status_lock:
+            global_update_status["total"] = len(projects)
+            global_update_status["current"] = 0
 
         global_logs: dict[str, list[str] | str] = {}
         success_count = 0
         error_count = 0
 
         for index, project in enumerate(projects):
-            global_update_status["current"] = index + 1
-            global_update_status["current_project"] = project.name
+            with _status_lock:
+                global_update_status["current"] = index + 1
+                global_update_status["current_project"] = project.name
 
             if index > 0:
                 time.sleep(2)
@@ -134,14 +164,15 @@ def global_update_job(locale: str | None = None) -> None:
                 logs = [t("scheduler.internal_loop_error", loc, exc=exc)]
 
             global_logs[project.name] = logs
-            global_update_status["processed"].append(
-                {
-                    "name": project.name,
-                    "status": t("log.status_ok", loc)
-                    if success
-                    else t("log.status_error", loc),
-                }
-            )
+            with _status_lock:
+                global_update_status["processed"].append(
+                    {
+                        "name": project.name,
+                        "status": t("log.status_ok", loc)
+                        if success
+                        else t("log.status_error", loc),
+                    }
+                )
 
             if success:
                 success_count += 1
@@ -149,7 +180,10 @@ def global_update_job(locale: str | None = None) -> None:
                 error_count += 1
 
         if error_count == 0:
-            global_update_status["current_project"] = t("scheduler.status_pruning", loc)
+            with _status_lock:
+                global_update_status["current_project"] = t(
+                    "scheduler.status_pruning", loc
+                )
             try:
                 logger.info("Iniciando espera de seguridad de 5s antes del prune...")
                 time.sleep(5)
@@ -178,11 +212,21 @@ def global_update_job(locale: str | None = None) -> None:
             summary=summary,
             details=global_logs,
         )
+    except Exception:
+        # Via POST /api/update-all this runs as a Starlette BackgroundTask, i.e. after the
+        # 200 has already gone out. Without this the traceback surfaced only as "Exception
+        # in ASGI application" and the user was told the update had started.
+        logger.exception("La actualización global terminó con una excepción.")
     finally:
         if db is not None:
             db.close()
-        global_update_status["is_running"] = False
-        global_update_status["current_project"] = ""
+        with _status_lock:
+            # All of them, not just is_running: total and current used to keep the
+            # previous run's values, so the progress widget read "5 / 5" forever.
+            global_update_status["is_running"] = False
+            global_update_status["current_project"] = ""
+            global_update_status["total"] = 0
+            global_update_status["current"] = 0
         global_update_lock.release()
 
 
@@ -270,31 +314,57 @@ def _run_job(target: str) -> None:
 
 
 def refresh_scheduler_jobs() -> None:
-    scheduler.remove_all_jobs()
+    # Serialised: this drops every job before adding them back, and it is called from the
+    # request threads of create/delete. Two overlapping calls left a window with no jobs
+    # registered at all.
+    with _refresh_lock:
+        scheduler.remove_all_jobs()
 
-    db = SessionLocal()
-    count = 0
-    try:
-        tasks = db.query(ScheduledTask).filter(ScheduledTask.active.is_(True)).all()
+        db = SessionLocal()
+        count = 0
+        pruned = 0
+        try:
+            tasks = db.query(ScheduledTask).filter(ScheduledTask.active.is_(True)).all()
 
-        for task in tasks:
-            try:
-                job_id = f"job_{task.id}"
-                trigger = build_trigger(task.task_type, task.expression)
-                scheduler.add_job(
-                    job_wrapper,
-                    trigger,
-                    args=[task.target, task.id, task.task_type],
-                    id=job_id,
-                    replace_existing=True,
-                )
-                count += 1
-            except Exception as exc:
-                logger.error("Error cargando tarea %s: %s", task.id, exc)
-    finally:
-        db.close()
+            for task in tasks:
+                try:
+                    trigger = build_trigger(task.task_type, task.expression)
+                except Exception as exc:
+                    logger.error("Error cargando tarea %s: %s", task.id, exc)
+                    continue
 
-    logger.info("Scheduler refrescado: %s tareas activas.", count)
+                # A one-shot whose moment passed while the container was down can never
+                # fire, so registering it only produces a misfire on every refresh and
+                # leaves the UI listing it as pending forever.
+                if task.task_type == "date" and trigger_is_past(trigger):
+                    task.active = False
+                    pruned += 1
+                    continue
+
+                try:
+                    scheduler.add_job(
+                        job_wrapper,
+                        trigger,
+                        args=[task.target, task.id, task.task_type],
+                        id=f"job_{task.id}",
+                        replace_existing=True,
+                    )
+                    count += 1
+                except Exception as exc:
+                    logger.error("Error cargando tarea %s: %s", task.id, exc)
+
+            if pruned:
+                try:
+                    db.commit()
+                except SQLAlchemyError:
+                    db.rollback()
+                    logger.warning("No se pudieron retirar %s tareas vencidas.", pruned)
+        finally:
+            db.close()
+
+    logger.info(
+        "Scheduler refrescado: %s tareas activas, %s vencidas retiradas.", count, pruned
+    )
 
 
 def start_scheduler() -> None:

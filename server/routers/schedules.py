@@ -8,9 +8,8 @@ from server.database import get_db
 from server.locale.http import get_request_locale
 from server.locale.log_messages import t
 from server.models.db import ScheduledTask
-from server.models.schemas import ScheduleInput, ScheduledTaskOut
+from server.models.schemas import ScheduledTaskOut, ScheduleInput
 from server.services.scheduler import build_trigger, refresh_scheduler_jobs
-
 
 router = APIRouter(prefix="/api", tags=["schedules"])
 
@@ -61,7 +60,7 @@ def create_schedule(
         expression = _normalize_date_expression(data.date_iso or "")
 
     try:
-        build_trigger(data.task_type, expression, locale=locale)
+        build_trigger(data.task_type, expression, locale=locale, reject_past=True)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

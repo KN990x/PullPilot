@@ -15,16 +15,33 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Never on a push. This repo commits straight to main with no PRs, so this is the only
+  # run a commit ever gets: cancelling it because a second commit arrived meant the first
+  # one was never validated at all. Superseded PR runs are still fair game to cancel.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
+    # A hung Docker build would otherwise burn the 6h default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      # The one file whose breakage is silent: an invalid dependabot.yml disables
+      # Dependabot entirely, with no error anywhere. Nothing checked it before.
+      - name: Validate workflows and Dependabot config
+        run: |
+          set -euo pipefail
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color .github/workflows/*.yml
+          rm -f ./actionlint
+          python -m pip install --quiet check-jsonschema
+          check-jsonschema --schemafile https://json.schemastore.org/dependabot-2.0.json \
+            .github/dependabot.yml
 
       # 3.11 only: what .python-version pins and what the image ships.
       - uses: actions/setup-python@v7

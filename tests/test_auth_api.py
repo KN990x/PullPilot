@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-
 from server.app import app
 from server.login_rate_limit import MAX_ATTEMPTS
 from tests.conftest import SETUP_PASSWORD, SETUP_USERNAME

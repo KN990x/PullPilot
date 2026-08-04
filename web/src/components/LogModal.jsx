@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
-import { X } from "lucide-react";
+import { Copy, X } from "lucide-react";
+
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 function safeStringifyDetails(details) {
   try {
@@ -9,64 +10,39 @@ function safeStringifyDetails(details) {
   }
 }
 
-export default function LogModal({ t, selectedLog, onClose }) {
-  const dialogRef = useRef(null);
-  const closeButtonRef = useRef(null);
-
-  useEffect(() => {
-    if (!selectedLog) {
-      return undefined;
-    }
-
-    const previousFocused = document.activeElement;
-    closeButtonRef.current?.focus();
-
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-
-      if (event.key !== "Tab" || !dialogRef.current) {
-        return;
-      }
-
-      const focusableElements = dialogRef.current.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (!focusableElements.length) {
-        return;
-      }
-
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      const currentElement = document.activeElement;
-
-      if (event.shiftKey && currentElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && currentElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      if (previousFocused instanceof HTMLElement) {
-        previousFocused.focus();
-      }
-    };
-  }, [onClose, selectedLog]);
+export default function LogModal({ t, selectedLog, onClose, onCopied }) {
+  const { dialogRef, initialFocusRef } = useFocusTrap({
+    open: Boolean(selectedLog),
+    onClose,
+  });
 
   if (!selectedLog) {
     return null;
   }
 
+  const body = safeStringifyDetails(selectedLog.details);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(body);
+      onCopied?.(t("modal.copied"));
+    } catch {
+      onCopied?.(t("modal.copy_failed"), "error");
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      role="presentation"
+      onClick={(event) => {
+        // Only a click on the backdrop itself, so no stopPropagation handler is needed on
+        // the dialog. Escape closes it too; the focus trap owns that.
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         ref={dialogRef}
         role="dialog"
@@ -79,19 +55,28 @@ export default function LogModal({ t, selectedLog, onClose }) {
             {t("modal.title", { id: selectedLog.id })}
           </h3>
           <button
-            ref={closeButtonRef}
+            ref={initialFocusRef}
+            type="button"
             onClick={onClose}
             aria-label={t("modal.close")}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
+            className="text-slate-500 hover:text-slate-700 transition-colors"
           >
-            <X size={24} />
+            <X size={24} aria-hidden="true" />
           </button>
         </div>
         <div className="p-6 overflow-y-auto font-mono text-xs bg-slate-900 text-slate-300">
-          <pre className="whitespace-pre-wrap">{safeStringifyDetails(selectedLog.details)}</pre>
+          <pre className="whitespace-pre-wrap">{body}</pre>
         </div>
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+        <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
           <button
+            type="button"
+            onClick={copyToClipboard}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 rounded-lg font-medium transition-colors"
+          >
+            <Copy size={16} aria-hidden="true" /> {t("modal.copy")}
+          </button>
+          <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors"
           >

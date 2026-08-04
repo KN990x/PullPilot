@@ -92,7 +92,7 @@ intentional — it is what surfaced the missing `workbox-window` declaration tha
 hoisting had been hiding. If an import fails to resolve, the fix is almost always to
 declare the dependency, not to hoist it.
 
-In development, Vite **proxies** `/api` (and related auth routes) to `http://localhost:8000`. Keep the backend on port 8000 and use Vite’s dev port for the UI (typically 5173).
+In development, Vite **proxies** `/api` to `http://localhost:8000`. Keep the backend on port 8000 and use Vite’s dev port for the UI (typically 5173).
 
 ### Verify the build
 
@@ -100,7 +100,7 @@ In development, Vite **proxies** `/api` (and related auth routes) to `http://loc
 make lint
 ```
 
-Invokes Ruff on `server/` and `tests/`, byte-compiles `server/` using the Make variable `PY` (defaults to `pyenv exec python`), then runs `pnpm run lint` and `pnpm run build` in `web/`.
+Invokes Ruff on `server/` and `tests/`, byte-compiles `server/` using the Make variable `PY`, then runs `pnpm run lint` and `pnpm run build` in `web/`. `PY` resolves to `.venv/bin/python` when that exists (which is what `make setup` creates from `.python-version`) and to plain `python` otherwise.
 
 ### Tests
 
@@ -108,9 +108,10 @@ Invokes Ruff on `server/` and `tests/`, byte-compiles `server/` using the Make v
 make test
 ```
 
-Runs `pytest` via `PY -m pytest tests/`, where `PY` defaults to `pyenv exec python` so the
-interpreter comes from `.python-version` whether or not the venv is active. Without pyenv,
-point it at your own interpreter: `PY=python3.11 make test`.
+Runs **both** suites: `PY -m pytest tests/` for the backend and then `pnpm run test`
+(vitest) in `web/`. `PY` resolves to `.venv/bin/python` when it exists, so the interpreter
+comes from `.python-version` whether or not the venv is active; otherwise point it at your
+own: `PY=python3.11 make test`.
 
 ### Docker image
 

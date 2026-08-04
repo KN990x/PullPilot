@@ -6,15 +6,14 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from server.config import logger
+from server.database import session_scope
 from server.locale.http import get_request_locale
 from server.locale.log_messages import t
-from server.database import session_scope
 from server.models.db import ProjectSettings
 from server.models.schemas import Project
 from server.services.locks import ProjectBusyError, project_update_slot
 from server.services.projects import scan_projects_logic, update_single_project_logic
 from server.services.update_logs import persist_update_log
-
 
 router = APIRouter(prefix="/api", tags=["projects"])
 
@@ -57,8 +56,19 @@ async def get_projects():
 @router.post("/projects/{name}/update")
 async def update_project(name: str, locale: str = Depends(get_request_locale)):
     def work(db: Session):
-        # Take the slot first: two requests on the same stack used to overlap, taking
-        # the same containers down and up at once.
+        # Existence first: taking the slot for a name that is not a project answered 500,
+        # wrote an ERROR row into the history and created a lock entry that was never
+        # collected. The sibling toggle endpoints already answered 404 here.
+        exists = (
+            db.query(ProjectSettings.id).filter(ProjectSettings.name == name).first()
+        )
+        if exists is None:
+            raise HTTPException(
+                status_code=404, detail=t("http.project_not_found", locale)
+            )
+
+        # Then the slot: two requests on the same stack used to overlap, taking the same
+        # containers down and up at once.
         try:
             with project_update_slot(name):
                 return _run_update(name, db, locale)
@@ -84,9 +94,11 @@ def _run_update(name: str, db: Session, locale: str) -> dict:
             details={name: logs},
         )
     except SQLAlchemyError:
-        raise HTTPException(
-            status_code=500, detail=t("http.history_save_failed", locale)
-        ) from None
+        # Not fatal to the request: the stack has already been pulled, recreated and
+        # health-checked. Answering 500 here reported a working deploy as failed and
+        # invited the user to run the whole thing again.
+        logger.error("No se pudo guardar el historial de %s.", name)
+        logs = [*logs, t("http.history_save_failed", locale)]
 
     if not success:
         logger.error("Actualización fallida para %s:\n%s", name, "\n".join(logs))

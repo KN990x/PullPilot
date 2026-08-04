@@ -1,7 +1,6 @@
 import pytest
-from sqlalchemy.orm import Session
-
 from server.services import auth as auth_service
+from sqlalchemy.orm import Session
 
 
 def test_hash_format_is_self_describing() -> None:

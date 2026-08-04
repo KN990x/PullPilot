@@ -4,6 +4,9 @@ export function usePolling() {
   const pollingRef = useRef(null);
   const intervalRef = useRef(null);
   const callbackRef = useRef(null);
+  // The tick fires on a fixed cadence and does not await the callback, so a backend
+  // slower than the interval used to stack requests without bound.
+  const inFlightRef = useRef(false);
 
   const startPolling = useCallback((callback, intervalMs = 1000) => {
     callbackRef.current = callback;
@@ -17,9 +20,13 @@ export function usePolling() {
 
     intervalRef.current = intervalMs;
     pollingRef.current = setInterval(() => {
-      if (typeof callbackRef.current === "function") {
-        callbackRef.current();
+      if (typeof callbackRef.current !== "function" || inFlightRef.current) {
+        return;
       }
+      inFlightRef.current = true;
+      Promise.resolve(callbackRef.current()).finally(() => {
+        inFlightRef.current = false;
+      });
     }, intervalMs);
   }, []);
 
@@ -30,6 +37,7 @@ export function usePolling() {
     }
     intervalRef.current = null;
     callbackRef.current = null;
+    inFlightRef.current = false;
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);

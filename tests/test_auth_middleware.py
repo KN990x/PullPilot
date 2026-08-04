@@ -1,7 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
-
 from server import auth_state
+from server.config import SESSION_COOKIE_NAME
+from server.database import session_scope
+from server.models.db import AuthCredential
 
 
 @pytest.mark.parametrize("path", ["/api/loquesea.json", "/api/projects.json", "/api/x.js"])
@@ -53,6 +55,36 @@ def test_session_from_a_previous_token_version_is_rejected(logged_in_client: Tes
     assert logged_in_client.get("/api/projects").status_code == 200
 
     auth_state.bump_token_version(99)
+
+    assert logged_in_client.get("/api/projects").status_code == 401
+    assert logged_in_client.get("/api/projects").json()["code"] == "session_expired"
+
+
+def test_session_from_a_wiped_account_is_rejected(logged_in_client: TestClient) -> None:
+    """The README's recovery is `DELETE FROM auth_credentials` plus a new wizard run.
+
+    That resets token_version to 1, which is what the previous account's cookie already
+    carried, so the old session sailed through the middleware and reached every endpoint
+    while /api/auth/status reported nobody logged in.
+    """
+    assert logged_in_client.get("/api/projects").status_code == 200
+    stale_cookie = logged_in_client.cookies[SESSION_COOKIE_NAME]
+
+    with session_scope() as db:
+        db.query(AuthCredential).delete()
+        db.commit()
+    auth_state.reset_for_tests()
+
+    response = logged_in_client.post(
+        "/api/auth/setup",
+        json={"username": "otro", "password": "otrasecreta", "password_confirm": "otrasecreta"},
+    )
+    assert response.status_code == 201, response.text
+
+    # Setup reissued the cookie for the new account; put back the one the previous
+    # owner's browser still holds. Same token_version, different user.
+    logged_in_client.cookies.clear()
+    logged_in_client.cookies.set(SESSION_COOKIE_NAME, stale_cookie)
 
     assert logged_in_client.get("/api/projects").status_code == 401
     assert logged_in_client.get("/api/projects").json()["code"] == "session_expired"

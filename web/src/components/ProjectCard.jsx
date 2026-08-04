@@ -11,9 +11,10 @@ export default function ProjectCard({
 }) {
   const isLocked = isGlobalUpdate || isUpdatingThis;
 
+  // `key` used to sit here too, where it means nothing: it only matters on the element a
+  // list render produces, which Dashboard already does.
   return (
     <div
-      key={project.name}
       className={`bg-white rounded-xl border shadow-sm transition-all duration-200
         ${project.excluded ? "opacity-60 border-slate-200 bg-slate-50" : "border-slate-200"}
         ${isLocked ? "opacity-60 pointer-events-none select-none grayscale-[0.5]" : "hover:shadow-md"}
@@ -24,11 +25,13 @@ export default function ProjectCard({
           <h3 className="font-bold text-lg text-slate-800 break-all">{project.name}</h3>
           {(isGlobalUpdate && currentProject === project.name) || isUpdatingThis ? (
             <span className="text-xs text-blue-600 flex items-center gap-1 mt-1 animate-pulse font-bold">
-              <Loader2 size={12} className="animate-spin" /> {t("status.updating")}
+              <Loader2 size={12} className="animate-spin" aria-hidden="true" />{" "}
+              {t("status.updating")}
             </span>
           ) : (
             <div className="flex items-center gap-2 mt-1">
               <span
+                aria-hidden="true"
                 className={`w-2 h-2 rounded-full ${
                   project.status === "running"
                     ? "bg-green-500"
@@ -37,21 +40,29 @@ export default function ProjectCard({
                       : "bg-red-500"
                 }`}
               />
-              <span className="text-xs uppercase font-bold text-slate-400 tracking-wider">
-                {project.status}
+              {/* Translated, and at slate-600: the raw backend literal meant a Spanish
+                  user read "RUNNING", and slate-400 on white is ~2.6:1 for what is the
+                  card's primary datum. */}
+              <span className="text-xs uppercase font-bold text-slate-600 tracking-wider">
+                {t(`status.state_${project.status}`, { defaultValue: project.status })}
               </span>
             </div>
           )}
         </div>
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={() => onUpdateProject(project.name)}
             disabled={isUpdatingThis || project.excluded || isGlobalUpdate}
-            title={t("status.update_project")}
-            aria-label={t("status.update_project")}
-            className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg disabled:opacity-50 transition-colors"
+            title={t("card.update_project_named", { name: project.name })}
+            aria-label={t("card.update_project_named", { name: project.name })}
+            className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <RefreshCw size={18} className={isUpdatingThis ? "animate-spin" : ""} />
+            <RefreshCw
+              size={18}
+              className={isUpdatingThis ? "animate-spin" : ""}
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
@@ -59,7 +70,7 @@ export default function ProjectCard({
       <div className="p-5 space-y-4">
         <div className="flex justify-between items-center text-sm">
           <span className="text-slate-500 flex items-center gap-2">
-            <FileText size={16} /> {t("card.containers")}
+            <FileText size={16} aria-hidden="true" /> {t("card.containers")}
           </span>
           <span className="font-mono font-medium bg-slate-100 px-2 py-0.5 rounded text-slate-700">
             {project.containers}
@@ -69,7 +80,7 @@ export default function ProjectCard({
         <div className="pt-4 border-t border-slate-100 space-y-3">
           <label className="flex items-center justify-between cursor-pointer group">
             <span className="text-sm text-slate-600 group-hover:text-slate-900 flex items-center gap-2">
-              <Power size={16} /> {t("card.full_stop")}
+              <Power size={16} aria-hidden="true" /> {t("card.full_stop")}
             </span>
             <div className="relative inline-flex items-center cursor-pointer">
               <input
@@ -85,7 +96,7 @@ export default function ProjectCard({
 
           <label className="flex items-center justify-between cursor-pointer group">
             <span className="text-sm text-slate-600 group-hover:text-slate-900 flex items-center gap-2">
-              <AlertTriangle size={16} /> {t("card.exclude")}
+              <AlertTriangle size={16} aria-hidden="true" /> {t("card.exclude")}
             </span>
             <div className="relative inline-flex items-center cursor-pointer">
               <input

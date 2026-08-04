@@ -16,14 +16,28 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+# Ceiling on distinct project names held at once, mirroring login_rate_limit. A slot used
+# to be created for any string the caller passed, so requests naming projects that do not
+# exist grew this map without bound.
+MAX_TRACKED_PROJECTS = 1024
+
 _registry_lock = threading.Lock()
 _project_locks: dict[str, threading.Lock] = {}
+
+
+def _evict_idle_locked() -> None:
+    """Drop slots nobody holds. Call with _registry_lock held."""
+    if len(_project_locks) < MAX_TRACKED_PROJECTS:
+        return
+    for name in [n for n, lock in _project_locks.items() if not lock.locked()]:
+        del _project_locks[name]
 
 
 def _lock_for(name: str) -> threading.Lock:
     with _registry_lock:
         lock = _project_locks.get(name)
         if lock is None:
+            _evict_idle_locked()
             lock = threading.Lock()
             _project_locks[name] = lock
         return lock

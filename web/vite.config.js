@@ -12,7 +12,10 @@ export default defineConfig({
       registerType: "prompt",
       includeAssets: ["assets/logo.png"],
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        // The screenshots for the README used to live in public/assets and matched this
+        // glob, so a 310 KB image nothing referenced was precached into every install.
+        // They are in docs/ now; keep this list to what the app actually loads.
+        globPatterns: ["**/*.{js,css,html,ico,svg}", "assets/logo.png"],
         // Login lives in the SPA, so the service worker serves it the shell. The only
         // thing the shell can never answer is an API call.
         navigateFallbackDenylist: [/^\/api\//],
@@ -36,18 +39,10 @@ export default defineConfig({
     }),
   ],
   server: {
+    // Only /api. /login and /logout were proxied too, but the SPA has never called them:
+    // they are 302 shims the backend keeps for bookmarks on the old bundle.
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/login": {
-        target: "http://localhost:8000",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/logout": {
         target: "http://localhost:8000",
         changeOrigin: true,
         secure: false,

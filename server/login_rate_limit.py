@@ -13,6 +13,7 @@ network the requests really arrive from.
 
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass
 
@@ -28,6 +29,9 @@ WINDOW_SEC = 300
 MAX_TRACKED_KEYS = 1024
 
 _failed_attempts: dict[str, list[float]] = {}
+# The auth endpoints are sync `def`, so FastAPI runs them on N threadpool threads at once
+# and _recent's read-modify-write interleaved: concurrent failures went uncounted.
+_lock = threading.RLock()
 
 
 @dataclass(frozen=True)
@@ -73,35 +77,44 @@ def _evict_if_full() -> None:
 
 def is_login_rate_limited(identity: ClientIdentity) -> bool:
     now = time.time()
-    return any(len(_recent(key, now)) >= limit for key, limit in _buckets(identity))
+    with _lock:
+        return any(len(_recent(key, now)) >= limit for key, limit in _buckets(identity))
 
 
 def record_login_failure(identity: ClientIdentity) -> None:
     now = time.time()
-    for key, _limit in _buckets(identity):
-        times = _recent(key, now)
-        if key not in _failed_attempts:
-            _evict_if_full()
-        _failed_attempts.setdefault(key, times).append(now)
+    with _lock:
+        for key, _limit in _buckets(identity):
+            times = _recent(key, now)
+            if key not in _failed_attempts:
+                _evict_if_full()
+            _failed_attempts.setdefault(key, times).append(now)
 
 
 def clear_login_failures(identity: ClientIdentity) -> None:
-    for key, _limit in _buckets(identity):
-        _failed_attempts.pop(key, None)
+    with _lock:
+        for key, _limit in _buckets(identity):
+            _failed_attempts.pop(key, None)
 
 
 def seconds_until_reset(identity: ClientIdentity) -> int:
-    """Seconds until the oldest attempt of whichever bucket is blocking expires."""
+    """Seconds until the newest attempt of whichever bucket is blocking expires.
+
+    The newest, not the oldest: expiring the oldest only frees one slot, so a Retry-After
+    computed from it told the caller to come back while still over the limit.
+    """
     now = time.time()
-    blocked = [
-        min(times)
-        for key, limit in _buckets(identity)
-        if len(times := _recent(key, now)) >= limit
-    ]
+    with _lock:
+        blocked = [
+            max(times)
+            for key, limit in _buckets(identity)
+            if len(times := _recent(key, now)) >= limit
+        ]
     if not blocked:
         return 0
     return max(1, int(WINDOW_SEC - (now - max(blocked))))
 
 
 def reset_for_tests() -> None:
-    _failed_attempts.clear()
+    with _lock:
+        _failed_attempts.clear()

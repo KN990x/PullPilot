@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
 import { CheckCircle2, Loader2, Save, X } from "lucide-react";
+
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 const INPUT_CLASS =
   "w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all text-slate-700";
@@ -15,63 +16,24 @@ export default function AccountModal({
   error,
   success,
 }) {
-  const dialogRef = useRef(null);
-  const closeButtonRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) {
-      return undefined;
-    }
-
-    const previousFocused = document.activeElement;
-    closeButtonRef.current?.focus();
-
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-
-      if (event.key !== "Tab" || !dialogRef.current) {
-        return;
-      }
-
-      const focusableElements = dialogRef.current.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      if (!focusableElements.length) {
-        return;
-      }
-
-      const firstElement = focusableElements[0];
-      const lastElement = focusableElements[focusableElements.length - 1];
-      const currentElement = document.activeElement;
-
-      if (event.shiftKey && currentElement === firstElement) {
-        event.preventDefault();
-        lastElement.focus();
-      } else if (!event.shiftKey && currentElement === lastElement) {
-        event.preventDefault();
-        firstElement.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      if (previousFocused instanceof HTMLElement) {
-        previousFocused.focus();
-      }
-    };
-  }, [onClose, open]);
+  const { dialogRef, initialFocusRef } = useFocusTrap({ open, onClose });
 
   if (!open) {
     return null;
   }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+    <div
+      className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      role="presentation"
+      onClick={(event) => {
+        // Only a click on the backdrop itself, so no stopPropagation handler is needed on
+        // the dialog. Escape closes it too; the focus trap owns that.
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         ref={dialogRef}
         role="dialog"
@@ -84,17 +46,23 @@ export default function AccountModal({
             {t("account.title")}
           </h3>
           <button
-            ref={closeButtonRef}
+            ref={initialFocusRef}
+            type="button"
             onClick={onClose}
-            aria-label={t("account.cancel")}
-            className="text-slate-400 hover:text-slate-600 transition-colors"
+            aria-label={t("account.close")}
+            className="text-slate-500 hover:text-slate-700 transition-colors"
           >
-            <X size={24} />
+            <X size={24} aria-hidden="true" />
           </button>
         </div>
 
         <form onSubmit={onSubmit} className="p-6 overflow-y-auto flex flex-col gap-4">
-          <p className="text-xs text-slate-500">{t("account.hint_optional")}</p>
+          <p className="text-sm text-slate-600">{t("account.hint_optional")}</p>
+          {/* Said up front, not only in the success banner: signing every other device
+              out is not something to find out about after the fact. */}
+          <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+            {t("account.warning_signs_out")}
+          </p>
 
           {error && (
             <div
@@ -110,7 +78,7 @@ export default function AccountModal({
               role="status"
               className="bg-green-50 border border-green-200 text-green-700 rounded-lg p-3 text-sm flex items-start gap-2"
             >
-              <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+              <CheckCircle2 size={16} className="shrink-0 mt-0.5" aria-hidden="true" />
               <span>{t("account.success")}</span>
             </div>
           )}
@@ -190,12 +158,12 @@ export default function AccountModal({
             >
               {submitting ? (
                 <>
-                  <Loader2 size={20} className="animate-spin" />
+                  <Loader2 size={20} className="animate-spin" aria-hidden="true" />
                   {t("account.submitting")}
                 </>
               ) : (
                 <>
-                  <Save size={20} />
+                  <Save size={20} aria-hidden="true" />
                   {t("account.submit")}
                 </>
               )}

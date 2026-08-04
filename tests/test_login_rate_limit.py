@@ -6,7 +6,6 @@ client itself sends: a fresh forged value per request meant a fresh bucket per r
 """
 
 import pytest
-
 from server import login_rate_limit as rl
 from server.login_rate_limit import (
     MAX_ATTEMPTS,

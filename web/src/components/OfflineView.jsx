@@ -15,19 +15,23 @@ export default function OfflineView({ t, i18n, onToggleLanguage, onRetry, retryi
       onToggleLanguage={onToggleLanguage}
       subtitle={t("offline.subtitle")}
     >
-      <div className="flex flex-col items-center gap-4">
-        <ServerCrash size={32} className="text-slate-400" />
+      <div role="status" className="flex flex-col items-center gap-4">
+        <ServerCrash size={32} className="text-slate-500" aria-hidden="true" />
         <p className="text-sm text-slate-600 text-center">
           {t("auth.backend_unreachable")}
         </p>
-        <p className="text-xs text-slate-400 text-center">{t("offline.hint")}</p>
+        <p className="text-xs text-slate-600 text-center">{t("offline.hint")}</p>
         <button
           type="button"
           onClick={onRetry}
           disabled={retrying}
           className="w-full flex items-center justify-center gap-2 bg-slate-800 text-white text-sm font-medium py-2.5 rounded-lg hover:bg-slate-700 disabled:opacity-60 transition-colors"
         >
-          <RefreshCw size={16} className={retrying ? "animate-spin" : undefined} />
+          <RefreshCw
+            size={16}
+            className={retrying ? "animate-spin" : undefined}
+            aria-hidden="true"
+          />
           {retrying ? t("offline.retrying") : t("offline.retry")}
         </button>
       </div>

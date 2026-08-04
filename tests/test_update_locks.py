@@ -10,7 +10,6 @@ import threading
 import pytest
 import server.routers.projects as projects_router_module
 from fastapi.testclient import TestClient
-
 from server.services import locks
 
 
@@ -43,8 +42,9 @@ def test_slot_is_released_when_the_update_raises() -> None:
 
 
 def test_second_concurrent_update_gets_409(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
 ) -> None:
+    make_project("plex")
     started = threading.Event()
     release = threading.Event()
 
@@ -78,8 +78,9 @@ def test_second_concurrent_update_gets_409(
 
 
 def test_the_slot_is_free_again_afterwards(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
 ) -> None:
+    make_project("plex")
     monkeypatch.setattr(
         projects_router_module,
         "update_single_project_logic",

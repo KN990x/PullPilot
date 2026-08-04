@@ -5,7 +5,9 @@ import server.routers.projects as projects_router_module
 import server.services.projects as projects_module
 from fastapi.testclient import TestClient
 from server.database import SessionLocal
+from server.locale.log_messages import t
 from server.models.db import ProjectSettings
+from server.services.update_logs import persist_update_log
 
 
 def test_update_status(client: TestClient) -> None:
@@ -135,8 +137,9 @@ def test_trigger_update_all_message_english(client: TestClient) -> None:
 
 
 def test_update_passes_locale_to_logic(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
 ) -> None:
+    make_project("any")
     seen: dict[str, str] = {}
 
     def _fake(name, db, *, locale="es"):
@@ -157,9 +160,18 @@ def test_update_passes_locale_to_logic(
     assert seen.get("locale") == "en"
 
 
+def test_update_of_an_unknown_project_is_404(client: TestClient) -> None:
+    """It used to answer 500, write an ERROR row and leak a lock entry per name tried."""
+    response = client.post("/api/projects/no-existe/update")
+
+    assert response.status_code == 404
+    assert client.get("/api/history").json() == []
+
+
 def test_update_failed_detail_english(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
 ) -> None:
+    make_project("x")
     monkeypatch.setattr(
         projects_router_module,
         "update_single_project_logic",
@@ -172,7 +184,10 @@ def test_update_failed_detail_english(
     )
     assert r.status_code == 500
     detail = r.json().get("detail", "")
-    assert "history" in detail.lower() or "ui" in detail.lower()
+    # Compared against the Spanish string rather than by keyword: "la UI" also contains
+    # "ui", so the old `"history" in d or "ui" in d` passed even when Spanish came back.
+    assert detail == t("http.update_failed", "en")
+    assert detail != t("http.update_failed", "es")
 
 
 def test_create_schedule_rejects_unschedulable_date(client: TestClient) -> None:
@@ -278,8 +293,10 @@ def test_update_rejects_project_path_outside_projects_root(
 
 
 def test_update_project_failure_hides_internal_logs_in_http_detail(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
 ) -> None:
+    make_project("anything")
+
     def _fake_update(_name, _db, **_kw):
         return False, ["INTERNAL_DOCKER_STDERR_SECRET"]
 
@@ -292,14 +309,43 @@ def test_update_project_failure_hides_internal_logs_in_http_detail(
     assert "INTERNAL_DOCKER" not in response.text
 
 
-def test_validate_startup_does_not_require_anything(
-    monkeypatch: pytest.MonkeyPatch,
+def test_validate_startup_warns_but_never_aborts(
+    monkeypatch: pytest.MonkeyPatch, caplog
 ) -> None:
-    """With no credentials the startup carries on: the wizard creates them."""
+    """With no credentials the startup carries on: the wizard creates them.
+
+    It used to assert nothing at all, so it was true by construction. Both branches are
+    exercised now, including the ephemeral-secret warning that tells an operator their
+    volume is not writable.
+    """
     import server.config as cfg
 
     monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "file")
-    cfg.validate_startup_security()
+    with caplog.at_level("INFO"):
+        cfg.validate_startup_security()
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    caplog.clear()
+    monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "ephemeral")
+    with caplog.at_level("INFO"):
+        cfg.validate_startup_security()
+    assert [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_validate_startup_warns_when_public_url_has_no_scheme(
+    monkeypatch: pytest.MonkeyPatch, caplog
+) -> None:
+    """Without a scheme the cookie silently loses Secure and XFF stops being trusted."""
+    import server.config as cfg
+
+    monkeypatch.setattr(cfg, "SESSION_SECRET_SOURCE", "file")
+    monkeypatch.setattr(cfg, "PUBLIC_URL", "pullpilot.example.com")
+    monkeypatch.setattr(cfg, "_public_scheme", "")
+
+    with caplog.at_level("WARNING"):
+        cfg.validate_startup_security()
+
+    assert any("PUBLIC_URL" in r.message for r in caplog.records)
 
 
 def test_validate_startup_warns_on_an_ephemeral_secret(
@@ -338,27 +384,32 @@ def test_history_timestamps_carry_an_utc_offset(client: TestClient) -> None:
     assert delta < 60, f"timestamp is {delta}s away from now"
 
 
-def _fake_compose(running: int, declared: int):
-    """`compose ps -q` lists what is up; `config --services` what the file declares."""
+def _fake_compose(running: int, created: int):
+    """`compose ps -q` lists what is up; `ps -a -q` everything Compose has created.
+
+    Compared against created containers rather than the services `config --services`
+    declares: that also lists services gated behind `profiles:`, which never run, so any
+    stack using profiles was permanently `partial`.
+    """
 
     def run(cmd, cwd=None, **_kwargs):
         text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.endswith("ps -a -q"):
+            return "\n".join(f"container{n}" for n in range(created))
         if text.endswith("ps -q"):
             return "\n".join(f"container{n}" for n in range(running))
-        if text.endswith("config --services"):
-            return "\n".join(f"svc{n}" for n in range(declared))
         return ""
 
     return run
 
 
 @pytest.mark.parametrize(
-    ("running", "declared", "expected"),
+    ("running", "created", "expected"),
     [
         (3, 3, "running"),
         (2, 5, "partial"),
         (0, 5, "stopped"),
-        # More containers than services: a scaled service, still healthy.
+        # More running than created is not reachable in practice; treated as healthy.
         (6, 3, "running"),
     ],
 )
@@ -367,7 +418,7 @@ def test_project_status_reports_a_half_up_stack(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     running: int,
-    declared: int,
+    created: int,
     expected: str,
 ) -> None:
     """A stack with 2 of 5 services alive used to report `running` and look healthy."""
@@ -376,9 +427,92 @@ def test_project_status_reports_a_half_up_stack(
     proj.mkdir(parents=True)
     (proj / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
     monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
-    monkeypatch.setattr(projects_module, "run_command", _fake_compose(running, declared))
+    monkeypatch.setattr(projects_module, "run_command", _fake_compose(running, created))
 
     body = client.get("/api/projects").json()
 
     assert [p["status"] for p in body] == [expected]
     assert body[0]["containers"] == running
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "field"),
+    [("toggle_exclude", "excluded"), ("toggle_fullstop", "full_stop")],
+)
+def test_toggle_flips_the_field_and_is_idempotent_in_pairs(
+    client: TestClient, make_project, endpoint: str, field: str
+) -> None:
+    """Both toggles are advertised in the README and had no test at all."""
+    make_project("plex")
+
+    assert client.post(f"/api/projects/plex/{endpoint}").status_code == 200
+    assert _project_field("plex", field) is True
+
+    assert client.post(f"/api/projects/plex/{endpoint}").status_code == 200
+    assert _project_field("plex", field) is False
+
+
+@pytest.mark.parametrize("endpoint", ["toggle_exclude", "toggle_fullstop"])
+def test_toggle_of_an_unknown_project_is_404(client: TestClient, endpoint: str) -> None:
+    assert client.post(f"/api/projects/no-existe/{endpoint}").status_code == 404
+
+
+def test_toggle_exclude_is_reflected_in_the_projects_list(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    root = tmp_path / "stacks"
+    proj = root / "plex"
+    proj.mkdir(parents=True)
+    (proj / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(projects_module, "run_command", _fake_compose(1, 1))
+
+    assert client.get("/api/projects").json()[0]["excluded"] is False
+    client.post("/api/projects/plex/toggle_exclude")
+    assert client.get("/api/projects").json()[0]["excluded"] is True
+
+
+def _project_field(name: str, field: str):
+    db = SessionLocal()
+    try:
+        row = db.query(ProjectSettings).filter(ProjectSettings.name == name).first()
+        return getattr(row, field)
+    finally:
+        db.close()
+
+
+def test_delete_schedule_removes_the_row(client: TestClient) -> None:
+    """Only the 404 branch was covered; nothing asserted the row actually went away."""
+    created = client.post(
+        "/api/schedules",
+        json={
+            "target": "GLOBAL",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 4,
+            "minute": 0,
+        },
+    )
+    assert created.status_code == 200, created.text
+    schedule_id = created.json()["id"]
+    assert len(client.get("/api/schedules").json()) == 1
+
+    assert client.delete(f"/api/schedules/{schedule_id}").status_code == 200
+
+    assert client.get("/api/schedules").json() == []
+    assert client.delete(f"/api/schedules/{schedule_id}").status_code == 404
+
+
+def test_history_can_be_paged_past_the_first_twenty(client: TestClient) -> None:
+    """HISTORY_RETENTION keeps 200 rows but only 20 were ever reachable."""
+    db = SessionLocal()
+    try:
+        for n in range(25):
+            persist_update_log(db, status="SUCCESS", summary=f"run {n}", details={})
+    finally:
+        db.close()
+
+    assert len(client.get("/api/history").json()) == 20
+    assert len(client.get("/api/history?limit=25").json()) == 25
+    assert len(client.get("/api/history?limit=20&offset=20").json()) == 5
+    assert client.get("/api/history?limit=0").status_code == 422

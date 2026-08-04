@@ -95,13 +95,21 @@ class ScheduleInput(BaseModel):
     day_of_month: str = Field(default="1", pattern=r"^(?:[1-9]|[12]\d|3[01])$")
     hour: int = Field(default=0, ge=0, le=23)
     minute: int = Field(default=0, ge=0, le=59)
-    date_iso: str | None = None
+    date_iso: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def require_date_iso_for_once(self) -> Self:
         if self.task_type == "date":
             if not (self.date_iso and str(self.date_iso).strip()):
                 raise ValueError("date_iso es obligatorio para task_type date")
+        return self
+
+    @model_validator(mode="after")
+    def require_week_day_for_weekly(self) -> Self:
+        # `*` is the default and means "every day" in cron, so a weekly schedule created
+        # without naming a day silently ran daily.
+        if self.task_type == "cron" and self.frequency == "weekly" and self.week_day == "*":
+            raise ValueError("week_day es obligatorio para frequency weekly")
         return self
 
 

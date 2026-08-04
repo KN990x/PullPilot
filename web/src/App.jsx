@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import AccountModal from "./components/AccountModal";
 import AuthLayout from "./components/AuthLayout";
+import ConfirmDialog from "./components/ConfirmDialog";
 import Dashboard from "./components/Dashboard";
 import Footer from "./components/Footer";
 import Header from "./components/Header";
@@ -13,7 +14,9 @@ import OfflineView from "./components/OfflineView";
 import ProgressBar from "./components/ProgressBar";
 import ScheduleView from "./components/ScheduleView";
 import SetupView from "./components/SetupView";
+import Toaster from "./components/Toaster";
 import { usePolling } from "./hooks/usePolling";
+import { useToasts } from "./hooks/useToasts";
 import {
   changeCredentials,
   createSchedule,
@@ -23,11 +26,11 @@ import {
   fetchProjects,
   fetchSchedules,
   fetchUpdateStatus,
+  isAuthRedirectError,
   isBackendUnreachableError,
   login,
   logout,
   normalizeUiLocale,
-  SESSION_EXPIRED_ERROR,
   setupCredentials,
   toggleProjectSetting,
   triggerUpdateAll,
@@ -104,6 +107,12 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedFreq, setSelectedFreq] = useState("daily");
   const [progress, setProgress] = useState(DEFAULT_PROGRESS);
+  // Without this the dashboard rendered `projects === []` while the very first scan was
+  // still running, so the "no projects detected, check your STACKS_PATH" panel flashed on
+  // every entry and told the user their setup was broken while the data was in flight.
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [pendingToggles, setPendingToggles] = useState({});
+  const [confirmState, setConfirmState] = useState(null);
 
   // loading | setup | login | ready | offline. The SPA never redirects to authenticate:
   // it asks /api/auth/status and decides what to draw.
@@ -117,6 +126,21 @@ export default function App() {
   const [accountSuccess, setAccountSuccess] = useState(false);
 
   const { startPolling, stopPolling } = usePolling();
+  const { toasts, pushToast, dismissToast } = useToasts();
+
+  // Read through a ref rather than closed over: `requestContext` and `t` both change
+  // identity on a language switch, and the loaders below depend on them. One click on the
+  // ES/EN pill used to tear down polling and re-run a full project scan — up to eight
+  // `compose ps` subprocesses — plus /history and /schedules.
+  const localeRef = useRef(normalizeUiLocale(i18n.language));
+
+  useEffect(() => {
+    const locale = normalizeUiLocale(i18n.language);
+    localeRef.current = locale;
+    // index.html hardcodes lang="es", so in English a screen reader applied Spanish
+    // phonetics to the whole document.
+    document.documentElement.lang = locale;
+  }, [i18n.language]);
 
   const handleUnauthorized = useCallback(() => {
     stopPolling();
@@ -134,18 +158,32 @@ export default function App() {
     () => ({
       onUnauthorized: handleUnauthorized,
       onSetupRequired: handleSetupRequired,
-      locale: normalizeUiLocale(i18n.language),
+      // A getter, so the object identity stays stable across language switches while
+      // every request still sends the current Accept-Language.
+      get locale() {
+        return localeRef.current;
+      },
     }),
-    [handleSetupRequired, handleUnauthorized, i18n.language]
+    [handleSetupRequired, handleUnauthorized]
   );
 
+  // Newest response wins. loadProjects is called from the mount effect, from the poll on
+  // the update-finished edge and from a manual update, so a slow earlier scan could land
+  // last and clobber fresher data — including reverting an optimistic toggle.
+  const projectsRequestId = useRef(0);
+
   const loadProjects = useCallback(async () => {
+    const requestId = ++projectsRequestId.current;
+    setProjectsLoading(true);
     try {
       const data = await fetchProjects(requestContext);
+      if (requestId !== projectsRequestId.current) {
+        return;
+      }
       setProjects(data);
       setIsMockMode(false);
     } catch (error) {
-      if (error.message === SESSION_EXPIRED_ERROR) {
+      if (isAuthRedirectError(error) || requestId !== projectsRequestId.current) {
         return;
       }
       if (isBackendUnreachableError(error)) {
@@ -162,9 +200,13 @@ export default function App() {
       console.error("Error loading projects", error);
       setProjects([]);
       setIsMockMode(false);
-      alert(t("alerts.projects_load_error"));
+      pushToast("alerts.projects_load_error");
+    } finally {
+      if (requestId === projectsRequestId.current) {
+        setProjectsLoading(false);
+      }
     }
-  }, [requestContext, t]);
+  }, [pushToast, requestContext]);
 
   const loadHistory = useCallback(
     async (allowMockFallback = true) => {
@@ -173,7 +215,7 @@ export default function App() {
         const data = await fetchHistory(requestContext);
         setHistory(data);
       } catch (error) {
-        if (error.message === SESSION_EXPIRED_ERROR) {
+        if (isAuthRedirectError(error)) {
           return;
         }
         if (MOCK_MODE_ALLOWED && allowMockFallback && isBackendUnreachableError(error)) {
@@ -186,12 +228,12 @@ export default function App() {
         }
         console.error("Error loading history", error);
         setHistory([]);
-        alert(t("alerts.history_load_error"));
+        pushToast("alerts.history_load_error");
       } finally {
         setHistoryLoading(false);
       }
     },
-    [requestContext, t]
+    [pushToast, requestContext]
   );
 
   const loadSchedules = useCallback(async () => {
@@ -202,17 +244,23 @@ export default function App() {
       const data = await fetchSchedules(requestContext);
       setSchedules(data);
     } catch (error) {
-      if (error.message !== SESSION_EXPIRED_ERROR) {
-        console.error("Error fetching schedules", error);
+      if (isAuthRedirectError(error)) {
+        return;
       }
+      console.error("Error fetching schedules", error);
+      // Used to be console-only: the schedules tab silently showed a stale list.
+      pushToast("alerts.schedules_load_error");
     }
-  }, [isMockMode, requestContext]);
+  }, [isMockMode, pushToast, requestContext]);
 
   // Whether a global update was running last time we asked. Refreshing on every "not
   // running" answer meant the very first check, right after the mount had already
   // loaded everything, re-ran both loads: two full project scans (each up to eight
   // `compose ps` subprocesses) and two /history calls on every entry to the dashboard.
   const wasUpdatingRef = useRef(false);
+  const accountCloseTimer = useRef(undefined);
+
+  useEffect(() => () => clearTimeout(accountCloseTimer.current), []);
 
   const checkProgress = useCallback(async () => {
     try {
@@ -233,11 +281,32 @@ export default function App() {
         await loadHistory(false);
       }
     } catch (error) {
-      if (error.message !== SESSION_EXPIRED_ERROR) {
-        console.error("Error checking progress", error);
+      if (isAuthRedirectError(error)) {
+        return;
       }
+      // The interval keeps firing regardless of what happens in here, so bailing out
+      // without stopping it left the UI stuck: the progress bar never cleared, every card
+      // stayed pointer-events-none and Update All stayed disabled, forever. That is
+      // exactly the state PullPilot lands in while it updates its own container — the
+      // case OfflineView exists for.
+      stopPolling();
+      setProgress(DEFAULT_PROGRESS);
+      if (isBackendUnreachableError(error)) {
+        wasUpdatingRef.current = true;
+        setAuthState("offline");
+        return;
+      }
+      console.error("Error checking progress", error);
+      pushToast("alerts.progress_error");
     }
-  }, [loadHistory, loadProjects, requestContext, startPolling, stopPolling]);
+  }, [
+    loadHistory,
+    loadProjects,
+    pushToast,
+    requestContext,
+    startPolling,
+    stopPolling,
+  ]);
 
   const bootstrap = useCallback(async () => {
     try {
@@ -396,11 +465,18 @@ export default function App() {
       setAuthUsername(result.username);
       setAccountSuccess(true);
       form.reset();
-      setTimeout(() => {
+      // Kept in a ref and cleared on unmount: an uncancelled timer closed the dialog 2.5s
+      // later even if the user had already cancelled and reopened it to change something
+      // else, and set state on an unmounted component when the session expired meanwhile.
+      clearTimeout(accountCloseTimer.current);
+      accountCloseTimer.current = setTimeout(() => {
         setAccountOpen(false);
         setAccountSuccess(false);
       }, 2500);
     } catch (error) {
+      if (isAuthRedirectError(error)) {
+        return;
+      }
       console.error("Error changing credentials", error);
       setAccountError(authErrorMessage(error, t));
     } finally {
@@ -408,11 +484,16 @@ export default function App() {
     }
   };
 
-  const handleCloseAccount = () => {
+  // useCallback, not an inline arrow: both modals key their focus-trap effect on this
+  // identity, and during a global update the app re-renders once a second.
+  const handleCloseAccount = useCallback(() => {
+    clearTimeout(accountCloseTimer.current);
     setAccountOpen(false);
     setAccountError(null);
     setAccountSuccess(false);
-  };
+  }, []);
+
+  const handleCloseLog = useCallback(() => setSelectedLog(null), []);
 
   const handleUpdateProject = async (name) => {
     setUpdatingProjects((prev) => ({ ...prev, [name]: true }));
@@ -423,11 +504,20 @@ export default function App() {
       try {
         await updateProject(name, requestContext);
         await loadProjects();
+        pushToast("alerts.update_ok", "success", { name });
       } catch (error) {
         if (error?.status === 409) {
-          alert(t("alerts.update_in_progress"));
-        } else if (error.message !== SESSION_EXPIRED_ERROR) {
-          alert(t("alerts.backend_error"));
+          pushToast("alerts.update_in_progress");
+        } else if (!isAuthRedirectError(error)) {
+          // "Error connecting to backend" was wrong here: the backend answered, the
+          // update failed. Point at the history, which holds the logs that say why.
+          pushToast(
+            isBackendUnreachableError(error)
+              ? "alerts.backend_error"
+              : "alerts.update_failed",
+            "error",
+            { name }
+          );
         }
       }
     }
@@ -439,13 +529,9 @@ export default function App() {
     });
   };
 
-  const handleUpdateAll = async () => {
-    if (!confirm(t("alerts.update_all_confirm"))) {
-      return;
-    }
-
+  const runUpdateAll = async () => {
     if (isMockMode) {
-      alert(t("alerts.mock_global"));
+      pushToast("alerts.mock_global", "info");
       return;
     }
 
@@ -462,10 +548,21 @@ export default function App() {
       });
       startPolling(checkProgress, 1000);
     } catch (error) {
-      if (error.message !== SESSION_EXPIRED_ERROR) {
-        alert(t("alerts.backend_error"));
+      if (!isAuthRedirectError(error)) {
+        pushToast("alerts.backend_error");
       }
     }
+  };
+
+  const handleUpdateAll = () => {
+    const count = projects.filter((project) => !project.excluded).length;
+    setConfirmState({
+      titleKey: "confirm.update_all_title",
+      messageKey: "confirm.update_all_message",
+      options: { count },
+      confirmKey: "confirm.update_all_action",
+      onConfirm: runUpdateAll,
+    });
   };
 
   const handleCreateSchedule = async (event) => {
@@ -479,7 +576,7 @@ export default function App() {
     if (taskType === "date") {
       const dateIso = formData.get("date_iso");
       if (!dateIso || String(dateIso).trim() === "") {
-        alert(t("alerts.schedule_error"));
+        pushToast("alerts.schedule_error");
         return;
       }
       payload = {
@@ -499,7 +596,7 @@ export default function App() {
         minute < 0 ||
         minute > 59
       ) {
-        alert(t("alerts.schedule_error"));
+        pushToast("alerts.schedule_error");
         return;
       }
 
@@ -515,63 +612,106 @@ export default function App() {
     }
 
     try {
-      await createSchedule(payload, requestContext);
-      await loadSchedules();
+      const created = await createSchedule(payload, requestContext);
+      // The endpoint returns the created row, so appending it saves a full round trip.
+      setSchedules((prev) => [...prev, created]);
       event.target.reset();
       setSelectedFreq("daily");
+      pushToast("alerts.schedule_created", "success");
     } catch (error) {
-      if (error.message !== SESSION_EXPIRED_ERROR) {
-        alert(t("alerts.schedule_error"));
+      if (isAuthRedirectError(error)) {
+        return;
       }
+      // The 422 detail explains *why* the trigger was rejected — a date already gone, a
+      // weekly schedule with no day. Swallowing it left a flat "could not create".
+      pushToast(
+        error?.status === 422 ? "alerts.schedule_invalid" : "alerts.schedule_error",
+        "error",
+        { reason: error?.message ?? "" }
+      );
     }
   };
 
-  const handleDeleteSchedule = async (id) => {
-    if (!confirm(t("alerts.delete_schedule_confirm"))) {
-      return;
-    }
+  const runDeleteSchedule = async (id) => {
     try {
       await deleteSchedule(id, requestContext);
       await loadSchedules();
+      pushToast("alerts.schedule_deleted", "success");
     } catch (error) {
-      if (error.message !== SESSION_EXPIRED_ERROR) {
-        alert(t("alerts.schedule_error"));
+      if (isAuthRedirectError(error)) {
+        return;
       }
+      // It used to say "error creating schedule" — literally the wrong verb.
+      pushToast(
+        error?.status === 404 ? "alerts.schedule_already_gone" : "alerts.schedule_delete_error"
+      );
+      await loadSchedules();
     }
   };
 
-  const flipSetting = (name, setting) =>
+  const handleDeleteSchedule = (id) => {
+    const schedule = schedules.find((row) => row.id === id);
+    setConfirmState({
+      titleKey: "confirm.delete_schedule_title",
+      messageKey: "confirm.delete_schedule_message",
+      // Which one, rather than the anonymous "are you sure?" of the native dialog.
+      details: schedule
+        ? `${schedule.target} · ${formatExpression(schedule.expression, schedule.task_type)}`
+        : undefined,
+      confirmKey: "confirm.delete_schedule_action",
+      onConfirm: () => runDeleteSchedule(id),
+    });
+  };
+
+  const setSettingValue = (name, setting, value) =>
     setProjects((prev) =>
       prev.map((project) => {
         if (project.name !== name) {
           return project;
         }
-        if (setting === "exclude") {
-          return { ...project, excluded: !project.excluded };
-        }
-        if (setting === "fullstop") {
-          return { ...project, full_stop: !project.full_stop };
-        }
-        return project;
+        const field = setting === "exclude" ? "excluded" : "full_stop";
+        return { ...project, [field]: value };
       })
     );
 
   const toggleSetting = async (name, setting) => {
-    flipSetting(name, setting);
+    const key = `${name}:${setting}`;
+    // Guarded, and the rollback restores a captured value instead of flipping again:
+    // double-clicking sent two requests, and if the first failed the "flip back" inverted
+    // whatever the second had just set, leaving the UI disagreeing with the server.
+    if (pendingToggles[key]) {
+      return;
+    }
+
+    const current = projects.find((project) => project.name === name);
+    if (!current) {
+      return;
+    }
+    const field = setting === "exclude" ? "excluded" : "full_stop";
+    const previous = Boolean(current[field]);
+
+    setSettingValue(name, setting, !previous);
 
     if (isMockMode) {
       return;
     }
 
+    setPendingToggles((prev) => ({ ...prev, [key]: true }));
     try {
       // No reload afterwards: the optimistic flip already matches what the endpoint
       // stored, and re-scanning ran a `compose ps` per project to confirm one boolean.
       await toggleProjectSetting(name, setting, requestContext);
     } catch (error) {
-      flipSetting(name, setting);
-      if (error.message !== SESSION_EXPIRED_ERROR) {
-        alert(t("alerts.config_error"));
+      setSettingValue(name, setting, previous);
+      if (!isAuthRedirectError(error)) {
+        pushToast("alerts.config_error");
       }
+    } finally {
+      setPendingToggles((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
     }
   };
 
@@ -582,6 +722,10 @@ export default function App() {
     i18n.changeLanguage(newLang);
   };
 
+  // Dates were formatted with the *browser's* locale, so setting the UI to English on a
+  // Spanish machine still produced Spanish dates.
+  const uiLocale = normalizeUiLocale(i18n.language);
+
   const formatExpression = (expression, taskType = "cron") => {
     if (!expression) {
       return "";
@@ -591,13 +735,17 @@ export default function App() {
       // Rendered in the reader's timezone. Rows created before the offset was pinned
       // carry none, so they still read as whatever clock the container was on.
       const parsed = new Date(expression.replace(" ", "T"));
-      const at = Number.isNaN(parsed.getTime()) ? expression : parsed.toLocaleString();
+      const at = Number.isNaN(parsed.getTime())
+        ? expression
+        : parsed.toLocaleString(uiLocale);
       return t("schedule.format.once", { at });
     }
 
     const parts = expression.split(" ");
+    // Both padded: only the minute used to be, so 04:05 rendered as "4:05" while the form
+    // the user filled in showed "04".
     const minute = (parts[0] || "0").padStart(2, "0");
-    const hour = parts[1] || "0";
+    const hour = (parts[1] || "0").padStart(2, "0");
     const day = parts[2] || "*";
     const week = parts[4] || "*";
 
@@ -677,6 +825,7 @@ export default function App() {
           <Dashboard
             t={t}
             projects={projects}
+            projectsLoading={projectsLoading}
             progress={progress}
             updatingProjects={updatingProjects}
             onUpdateAll={handleUpdateAll}
@@ -703,12 +852,21 @@ export default function App() {
             t={t}
             history={history}
             historyLoading={historyLoading}
-            onRefresh={loadHistory}
+            locale={uiLocale}
+            // Wrapped: passed bare, React handed the click event to `allowMockFallback`.
+            onRefresh={() => loadHistory()}
             onSelectLog={setSelectedLog}
           />
         )}
 
-        <LogModal t={t} selectedLog={selectedLog} onClose={() => setSelectedLog(null)} />
+        <LogModal
+          t={t}
+          selectedLog={selectedLog}
+          onClose={handleCloseLog}
+          onCopied={(_message, tone = "success") =>
+            pushToast(tone === "success" ? "modal.copied" : "modal.copy_failed", tone)
+          }
+        />
 
         <AccountModal
           t={t}
@@ -720,9 +878,25 @@ export default function App() {
           error={accountError}
           success={accountSuccess}
         />
+
+        <ConfirmDialog
+          t={t}
+          open={Boolean(confirmState)}
+          title={confirmState ? t(confirmState.titleKey) : ""}
+          message={confirmState ? t(confirmState.messageKey, confirmState.options) : ""}
+          details={confirmState?.details}
+          confirmLabel={confirmState ? t(confirmState.confirmKey) : ""}
+          onCancel={() => setConfirmState(null)}
+          onConfirm={() => {
+            const action = confirmState?.onConfirm;
+            setConfirmState(null);
+            action?.();
+          }}
+        />
       </main>
 
       <Footer t={t} />
+      <Toaster t={t} toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

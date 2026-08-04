@@ -7,7 +7,6 @@ if "DATA_DIR" not in os.environ:
 
 import pytest
 from fastapi.testclient import TestClient
-
 from server import auth_state, login_rate_limit
 from server.app import app
 from server.database import session_scope
@@ -44,6 +43,30 @@ def _clean_database_state():
     _truncate()
     auth_state.reset_for_tests()
     login_rate_limit.reset_for_tests()
+
+
+class _NoSleep:
+    """Stand-in for the `time` module inside the scheduler."""
+
+    @staticmethod
+    def sleep(_seconds: float) -> None:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _scheduler_never_touches_docker(monkeypatch: pytest.MonkeyPatch):
+    """Keep `global_update_job` off the real Docker daemon and off the clock.
+
+    With no projects to update the job ends with `error_count == 0`, which is the branch
+    that sleeps 5 s and then runs `docker image prune -f`. Three tests reach it just by
+    calling `POST /api/update-all` (TestClient runs BackgroundTasks to completion), so the
+    suite really pruned images on whatever daemon CI had, and paid ~15 s of sleep for it.
+    Autouse rather than per-test: no test wants either side effect.
+    """
+    import server.services.scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, "time", _NoSleep)
+    monkeypatch.setattr(scheduler_module, "run_command", lambda *a, **kw: "")
 
 
 def _truncate() -> None:
@@ -86,6 +109,23 @@ def client(auth_client: TestClient) -> TestClient:
 @pytest.fixture()
 def logged_in_client(client: TestClient) -> TestClient:
     return client
+
+
+@pytest.fixture()
+def make_project():
+    """Insert a project row.
+
+    `POST /api/projects/{name}/update` checks the project exists before doing anything, so
+    a test that patches the update logic still needs the row to reach it.
+    """
+
+    def _make(name: str = "plex", path: str | None = None) -> str:
+        with session_scope() as db:
+            db.add(ProjectSettings(name=name, path=path or f"/srv/docker-stacks/{name}"))
+            db.commit()
+        return name
+
+    return _make
 
 
 @pytest.fixture()

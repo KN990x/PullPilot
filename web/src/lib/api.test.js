@@ -131,7 +131,7 @@ describe("request helpers", () => {
     html.clone = () => html;
     fetch.mockResolvedValue(html);
 
-    await expect(updateProject("plex")).rejects.toThrow(/no JSON|no es JSON|Respuesta no JSON/);
+    await expect(updateProject("plex")).rejects.toThrow(/Non-JSON response/);
   });
 
   it("joins pydantic's validation messages into one readable string", async () => {

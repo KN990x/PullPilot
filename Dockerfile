@@ -17,14 +17,22 @@ RUN pnpm run build
 # Keep this version in step with .python-version (pyenv) at the repo root.
 FROM python:3.11-slim
 
+# Unbuffered so `docker logs` shows what happened as it happens rather than when the pipe
+# fills; no .pyc files because the code is installed once and never re-imported cold.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 # Only `git` needs installing: `git pull` runs on stacks that are clones.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
 # Docker CLI and Compose plugin from the official image, not apt's `docker.io`: that
-# package drags in the whole engine (dockerd, containerd), which never runs here. It also
-# puts the Compose version under Dependabot instead of a hand-pinned curl.
+# package drags in the whole engine (dockerd, containerd), which never runs here.
+#
+# Caveat worth knowing: Dependabot's Docker updater parses `FROM` directives, and this is
+# a `COPY --from`. Do not assume the pin below is being watched — check it by hand when
+# reviewing the ignore rule for `docker` in .github/dependabot.yml.
 COPY --from=docker:28-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker:28-cli /usr/local/libexec/docker/cli-plugins/docker-compose \
      /usr/local/libexec/docker/cli-plugins/docker-compose
@@ -39,10 +47,10 @@ COPY server/ ./server
 # so nothing has to be told where the frontend is.
 COPY --from=frontend-builder /app-web/dist ./server/static
 
-RUN pip install --no-cache-dir . && rm -rf /build
-
+# WORKDIR before the rm, so the shell is not deleting the directory it is standing in.
+RUN pip install --no-cache-dir .
 WORKDIR /app
-RUN mkdir -p /app/data
+RUN rm -rf /build && mkdir -p /app/data
 
 EXPOSE 8000
 

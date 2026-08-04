@@ -6,6 +6,7 @@ variable again, it should be because a real problem needed it.
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -25,15 +26,23 @@ STACKS_PATH = Path(
 )
 PROJECTS_ROOT = STACKS_PATH
 
+# tzset() is what makes it stick: setting TZ after the interpreter starts does not change
+# what localtime_r (and so datetime.now()) returns on glibc. It happened to work in the
+# container only because compose exports TZ before the process starts, which left
+# `make dev-server` and a bare uvicorn on the host clock.
 os.environ.setdefault("TZ", "UTC")
+if hasattr(time, "tzset"):  # not available on Windows
+    time.tzset()
 
 PUBLIC_URL = (os.getenv("PUBLIC_URL") or "").strip()
 _public_scheme = urlparse(PUBLIC_URL).scheme if PUBLIC_URL else ""
 # Secure only over https: setting it on a plain-HTTP install means the browser never sends
 # the cookie back and nobody can log in.
 SESSION_HTTPS_ONLY = _public_scheme == "https"
-# With a proxy in front, the client IP for rate limiting is in X-Forwarded-For.
-TRUST_X_FORWARDED_FOR = bool(PUBLIC_URL)
+# With a proxy in front, the client IP for rate limiting is in X-Forwarded-For. Gated on
+# https like the cookie: the header is client-supplied, so trusting it without a TLS proxy
+# actually terminating in front hands anyone a fresh rate-limit bucket per request.
+TRUST_X_FORWARDED_FOR = _public_scheme == "https"
 
 # Undocumented: the container fixes it to /app/data, `make dev-server` points it at .devdata.
 DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
@@ -94,3 +103,14 @@ def validate_startup_security() -> None:
         )
     elif SESSION_SECRET_SOURCE == "file":
         logger.info("Secreto de sesión persistente en %s.", DATA_DIR / SECRET_FILENAME)
+
+    # Everything hanging off PUBLIC_URL keys on the scheme, so a bare hostname silently
+    # behaves like no PUBLIC_URL at all: cookie without Secure on an HTTPS install.
+    if PUBLIC_URL and not _public_scheme:
+        logger.warning(
+            "PUBLIC_URL=%s no incluye esquema. Sin 'https://' la cookie de sesión no se "
+            "marca como Secure y no se confía en X-Forwarded-For. Escríbela completa, "
+            "por ejemplo https://%s",
+            PUBLIC_URL,
+            PUBLIC_URL,
+        )

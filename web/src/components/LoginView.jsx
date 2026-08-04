@@ -41,6 +41,7 @@ export default function LoginView({
             name="username"
             type="text"
             autoComplete="username"
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- single-purpose full-screen form, this field is the only thing on it
             autoFocus
             required
             className={INPUT_CLASS}

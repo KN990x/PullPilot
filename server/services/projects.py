@@ -13,7 +13,6 @@ from server.locale.log_messages import t
 from server.models.db import ProjectSettings
 from server.services.docker import COMPOSE_CMD, run_command
 
-
 IGNORED_PROJECT_NAMES = {"pullpilot", "pullpilot-ui", "docker-updater", "data"}
 
 
@@ -133,14 +132,16 @@ def restore_stack_images(
     return restored
 
 
-def _compose_service_count(path_str: str) -> int | None:
-    """Services the stack declares, or None when the file cannot be read.
+def _compose_created_count(path_str: str) -> int | None:
+    """Containers Compose has created for the stack, running or not.
 
-    `config --services` exists in Compose v1 and v2 alike.
+    Counted instead of the services `config --services` declares: that lists every service
+    in the file, including ones gated behind `profiles:` that were never meant to run, so
+    any stack using profiles showed a permanent yellow `partial` dot.
     """
     try:
         out = run_command(
-            f"{COMPOSE_CMD} config --services",
+            f"{COMPOSE_CMD} ps -a -q",
             cwd=path_str,
             log_exec=False,
             log_errors=False,
@@ -160,11 +161,11 @@ def _compose_ps_status(path_str: str) -> tuple[str, int]:
     if running_count == 0:
         return "stopped", 0
 
-    # `ps -q` lists what is up, so fewer than declared means a half-up stack. Reporting
-    # that as "running" is how a stack with 2 of 5 services alive looked healthy; the
-    # yellow dot the dashboard already draws for `partial` had no way to be reached.
-    declared = _compose_service_count(path_str)
-    if declared is not None and running_count < declared:
+    # `ps -q` lists what is up, so fewer than exist means a half-up stack. Reporting that
+    # as "running" is how a stack with 2 of 5 services alive looked healthy; the yellow
+    # dot the dashboard already draws for `partial` had no way to be reached.
+    created = _compose_created_count(path_str)
+    if created is not None and running_count < created:
         return "partial", running_count
     return "running", running_count
 
@@ -199,13 +200,30 @@ def _wait_for_compose_healthy(
         # One call for every container, not one per container: this loop runs every two
         # seconds for up to a minute, so a six-service stack was spawning ~180 processes
         # per update. `docker inspect` answers a whole list in document order.
-        inspect_raw = run_command(
-            ["docker", "inspect", *container_ids], log_exec=False, locale=locale
-        )
-        inspected = json.loads(inspect_raw)
+        #
+        # Tolerated rather than raised: the IDs come from a `ps -q` up to two seconds ago,
+        # so a container recreated in between makes `docker inspect` exit non-zero. That
+        # used to reach the caller's rollback and undo a deploy over a transient race.
+        # A short list is the same race, and zip(strict=False) silently called the missing
+        # containers healthy. The loop's own timeout stays the real backstop.
+        try:
+            inspect_raw = run_command(
+                ["docker", "inspect", *container_ids],
+                log_exec=False,
+                log_errors=False,
+                locale=locale,
+            )
+            inspected = json.loads(inspect_raw)
+        except Exception:
+            time.sleep(2)
+            continue
+
+        if len(inspected) != len(container_ids):
+            time.sleep(2)
+            continue
 
         all_healthy = True
-        for container_id, data in zip(container_ids, inspected, strict=False):
+        for container_id, data in zip(container_ids, inspected, strict=True):
             state = data.get("State", {})
             status = state.get("Status")
             health = state.get("Health", {}).get("Status")
@@ -219,6 +237,11 @@ def _wait_for_compose_healthy(
                     raise RuntimeError(
                         t("health.exited", locale, cid=cid, code=exit_code)
                     )
+                # A one-shot service that finished cleanly: an init container, a migration
+                # or a backup job. It is never going to reach "running", so leaving it to
+                # the check below meant the loop could not converge, timed out, and the
+                # timeout rolled back a deploy that had in fact worked.
+                continue
 
             if health == "unhealthy":
                 raise RuntimeError(t("health.unhealthy", locale, cid=cid))
@@ -249,16 +272,21 @@ def scan_projects_logic(db: Session) -> list[dict]:
         if entry.lower() in IGNORED_PROJECT_NAMES:
             continue
 
-        if not compose_project_path_ok(path):
+        # Containment checked here, not just at update time, and the resolved path is what
+        # gets stored. Accepting the raw path listed symlinked stacks on the dashboard that
+        # every update then rejected with a "possible tampered DB data" message, and that
+        # the scheduler skipped without saying so.
+        if not compose_stack_allowed(path):
             continue
+        resolved = str(path.resolve())
 
         proj = db.query(ProjectSettings).filter(ProjectSettings.name == entry).first()
         if not proj:
-            proj = ProjectSettings(name=entry, path=str(path))
+            proj = ProjectSettings(name=entry, path=resolved)
             db.add(proj)
             pending_db_write = True
-        elif proj.path != str(path):
-            proj.path = str(path)
+        elif proj.path != resolved:
+            proj.path = resolved
             pending_db_write = True
 
         ordered.append((entry, path, proj))
@@ -339,6 +367,10 @@ def update_single_project_logic(
     workdir_str = str(workdir)
 
     git_hash_before: str | None = None
+    # `git reset --hard` in the rollback deletes uncommitted work. Editing compose files
+    # or .env in place inside a cloned stack is normal in a homelab, so a dirty tree
+    # disables that one step; everything else about the rollback still runs.
+    git_tree_dirty = False
     is_git_repo = (workdir / ".git").is_dir()
 
     if is_git_repo:
@@ -351,6 +383,21 @@ def update_single_project_logic(
             )
         except Exception as exc:
             log(t("update.git_snapshot_warn", locale, exc=exc), "WARN")
+
+        try:
+            git_tree_dirty = bool(
+                run_command(
+                    "git status --porcelain",
+                    cwd=workdir_str,
+                    log_exec=False,
+                    locale=locale,
+                ).strip()
+            )
+        except Exception:
+            # Unknown state: assume dirty. The branch being guarded is the destructive one.
+            git_tree_dirty = True
+        if git_tree_dirty:
+            log(t("update.git_dirty", locale), "WARN")
 
     # Before `git pull`, so the references match the compose file being replaced, and
     # before `compose pull`, which is what moves the tags.
@@ -395,7 +442,10 @@ def update_single_project_logic(
 
         # Each step guarded on its own: failing to move a tag back must not stop the
         # redeploy, which is the part that decides whether the stack ends up running.
-        if git_hash_before:
+        git_reverted = False
+        if git_hash_before and git_tree_dirty:
+            log(t("update.rollback_git_skipped_dirty", locale), "WARN")
+        elif git_hash_before:
             try:
                 run_command(
                     ["git", "reset", "--hard", git_hash_before],
@@ -403,11 +453,12 @@ def update_single_project_logic(
                     locale=locale,
                 )
                 log(t("update.rollback_git_reset", locale, commit=git_hash_before[:7]))
+                git_reverted = True
             except Exception as reset_exc:
                 log(t("update.rollback_git_failed", locale, exc=reset_exc), "WARN")
 
         restored = restore_stack_images(image_snapshot, log, locale=locale)
-        if not git_hash_before and not restored:
+        if not git_reverted and not restored:
             log(t("update.recovery_nothing_to_revert", locale), "WARN")
 
         # Unconditional: `compose stop`/`down` already ran, so bailing out here is what

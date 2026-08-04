@@ -5,7 +5,9 @@ import AuthLayout from "./AuthLayout";
 const INPUT_CLASS =
   "w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all text-slate-700";
 const LABEL_CLASS = "text-xs font-bold text-slate-500 uppercase tracking-wide";
-const HINT_CLASS = "text-xs text-slate-400";
+// slate-600, not slate-400: hint text on white at slate-400 is ~2.6:1, well under the
+// 4.5:1 WCAG AA needs, and these hints carry the password rules.
+const HINT_CLASS = "text-xs text-slate-600";
 
 export default function SetupView({
   t,
@@ -46,6 +48,7 @@ export default function SetupView({
             name="username"
             type="text"
             autoComplete="username"
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- single-purpose full-screen form, this field is the only thing on it
             autoFocus
             required
             minLength={3}

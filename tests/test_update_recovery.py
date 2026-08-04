@@ -14,7 +14,6 @@ import json
 import pytest
 import server.services.projects as projects_module
 from fastapi.testclient import TestClient
-
 from server.database import session_scope
 from server.models.db import ProjectSettings
 from server.services.docker import COMPOSE_CMD
@@ -217,3 +216,215 @@ def test_a_successful_update_never_reverts_anything(
     assert success is True
     assert not fake.ran("docker tag")
     assert fake.images["nginx:latest"] == NEW_NGINX
+
+
+def test_a_one_shot_container_that_exited_cleanly_does_not_block_the_healthcheck(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An init/migration container has no healthcheck and ends `exited` with code 0.
+
+    It is never going to be "running", so the health loop could not converge: it ran to
+    the timeout and the timeout rolled back a deploy that had actually worked.
+    """
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def with_a_one_shot(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.startswith("docker inspect "):
+            fake.calls.append(text)
+            return json.dumps(
+                [
+                    {"State": {"Status": "running"}},
+                    {"State": {"Status": "exited", "ExitCode": 0}},
+                ]
+            )
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", with_a_one_shot)
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is True, logs
+    assert len(fake.ran(UP_CMD)) == 1, "no rollback redeploy should have happened"
+
+
+def test_a_one_shot_container_that_exited_with_an_error_still_fails(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def with_a_crash(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.startswith("docker inspect "):
+            fake.calls.append(text)
+            return json.dumps([{"State": {"Status": "exited", "ExitCode": 1}}] * 2)
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", with_a_crash)
+    with session_scope() as db:
+        success, _ = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is False
+
+
+def test_a_dirty_git_tree_is_never_reset_hard(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`git reset --hard` in the rollback deletes uncommitted compose/.env edits."""
+    fake = FakeDocker(
+        images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS}, fail_on=UP_CMD
+    )
+    (stack / ".git").mkdir()
+    original = fake.__call__
+
+    def dirty_tree(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text == "git status --porcelain":
+            fake.calls.append(text)
+            return " M docker-compose.yml\n"
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", dirty_tree)
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is False
+    assert not fake.ran("git reset"), "uncommitted work would have been destroyed"
+    assert any("uncommitted" in line for line in logs)
+    assert len(fake.ran(UP_CMD)) == 2, "the stack must still be brought back up"
+
+
+def test_a_clean_git_tree_is_reset_on_failure(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeDocker(
+        images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS}, fail_on=UP_CMD
+    )
+    (stack / ".git").mkdir()
+
+    success, _ = _run(fake, monkeypatch)
+
+    assert success is False
+    assert fake.ran("git reset --hard abc1234def5678")
+
+
+@pytest.mark.parametrize(
+    ("state", "fragment"),
+    [
+        ({"Status": "restarting"}, "restart"),
+        ({"Status": "running", "Health": {"Status": "unhealthy"}}, "unhealthy"),
+    ],
+)
+def test_the_healthcheck_rejects_a_broken_container(
+    stack, monkeypatch: pytest.MonkeyPatch, state: dict, fragment: str
+) -> None:
+    """Each of these raises its own RuntimeError and none of them had a test."""
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def with_state(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.startswith("docker inspect "):
+            fake.calls.append(text)
+            return json.dumps([{"State": state}] * 2)
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", with_state)
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is False
+    assert any(fragment in line.lower() for line in logs)
+    assert len(fake.ran(UP_CMD)) == 2, "the rollback redeploy must still run"
+
+
+class FakeClock:
+    """`time` for the health loop: sleeping advances the clock instead of the wall.
+
+    The loop waits real seconds before giving up, which is correct in production and pure
+    dead time in a test.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def time(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_the_healthcheck_fails_when_no_container_comes_up(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def no_containers(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text == f"{COMPOSE_CMD} ps -q":
+            fake.calls.append(text)
+            return ""
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", no_containers)
+    monkeypatch.setattr(projects_module, "time", FakeClock())
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is False
+    assert any("no active containers" in line.lower() for line in logs)
+
+
+def test_the_healthcheck_gives_up_at_the_timeout(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A container stuck on `starting` forever must end the loop, not hang the request."""
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def forever_starting(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.startswith("docker inspect "):
+            fake.calls.append(text)
+            return json.dumps(
+                [{"State": {"Status": "running", "Health": {"Status": "starting"}}}] * 2
+            )
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", forever_starting)
+    monkeypatch.setattr(projects_module, "time", FakeClock())
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is False
+    assert any("timeout" in line.lower() for line in logs)
+
+
+def test_a_transient_docker_inspect_failure_does_not_trigger_a_rollback(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The IDs come from a `ps -q` up to two seconds old, so a container recreated in
+    between makes `docker inspect` exit non-zero. That used to reach the rollback and
+    undo a deploy over a race."""
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+    failures = {"left": 1}
+
+    def flaky_inspect(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.startswith("docker inspect ") and failures["left"]:
+            failures["left"] -= 1
+            fake.calls.append(text)
+            raise RuntimeError("No such object")
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", flaky_inspect)
+    with session_scope() as db:
+        success, _ = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is True
+    assert len(fake.ran(UP_CMD)) == 1, "no rollback redeploy should have happened"

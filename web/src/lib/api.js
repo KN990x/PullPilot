@@ -1,8 +1,17 @@
 export const API_URL = "/api";
-// Internal sentinel: handleAuthError throws it so `catch` blocks know the redirect is
-// already under way and do not stack an error on top.
-export const SESSION_EXPIRED_ERROR = "Sesión expirada";
-export const SETUP_REQUIRED_ERROR = "Configuración inicial pendiente";
+// Internal sentinels: handleAuthError throws one so `catch` blocks know the redirect is
+// already under way and do not stack an error on top. Deliberately not human text — they
+// used to be the Spanish strings the backend sends, compared with `===` at nine call
+// sites, so rewording a message silently broke every one of them.
+export const SESSION_EXPIRED_ERROR = "__pullpilot_session_expired__";
+export const SETUP_REQUIRED_ERROR = "__pullpilot_setup_required__";
+
+/** True for the two sentinels above: the app is already navigating, stay quiet. */
+export function isAuthRedirectError(error) {
+  return (
+    error?.message === SESSION_EXPIRED_ERROR || error?.message === SETUP_REQUIRED_ERROR
+  );
+}
 
 /** Normalise to es | en, matching the backend. */
 export function normalizeUiLocale(lang) {
@@ -86,6 +95,27 @@ async function publicRequestJson(path, options = {}, context = {}) {
   return readJsonBody(response);
 }
 
+/**
+ * For endpoints that answer 401 for both reasons. `/api/auth/credentials` is behind the
+ * session middleware, so an expired cookie 401s there before the handler runs — treating
+ * that like a wrong password left the dialog showing "session expired" with no way out.
+ * Only the middleware's own codes trigger the redirect; the rest stay form errors.
+ */
+async function sessionAwareRequestJson(path, options = {}, context = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: buildHeaders(options, context),
+  });
+  if (response.status === 401) {
+    const code = await peekErrorCode(response);
+    if (code === "session_expired" || code === "setup_required") {
+      await handleAuthError(response, context);
+    }
+  }
+  await assertOk(response);
+  return readJsonBody(response);
+}
+
 function jsonBody(payload) {
   return {
     method: "POST",
@@ -103,7 +133,12 @@ async function readJsonBody(response) {
     return JSON.parse(text);
   } catch {
     const preview = text.length > 200 ? `${text.slice(0, 200)}…` : text;
-    throw new Error(`Respuesta no JSON (${response.status}): ${preview}`);
+    const error = new Error(`Non-JSON response (${response.status}): ${preview}`);
+    // Carried so callers can still branch on the status. A reverse proxy answering 502
+    // with an HTML page used to produce an error with no `status` at all, so the 409
+    // check in the update flow missed it.
+    error.status = response.status;
+    throw error;
   }
 }
 
@@ -117,6 +152,8 @@ function errorMessageFromBody(data, status) {
       return detail.map((d) => d.msg).join("; ");
     }
   }
+  // English, like every other developer-facing string here. These reach the console and
+  // curl; what the user reads comes from the i18n key picked by `error.code`.
   return `Request failed (${status})`;
 }
 
@@ -126,6 +163,7 @@ async function assertOk(response) {
     try {
       data = await readJsonBody(response);
     } catch (err) {
+      // readJsonBody already stamped `status` on it.
       throw err instanceof Error ? err : new Error(String(err));
     }
     const error = new Error(errorMessageFromBody(data, response.status));
@@ -222,5 +260,5 @@ export function logout(context = {}) {
 }
 
 export function changeCredentials(payload, context = {}) {
-  return publicRequestJson("/auth/credentials", jsonBody(payload), context);
+  return sessionAwareRequestJson("/auth/credentials", jsonBody(payload), context);
 }

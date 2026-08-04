@@ -3,7 +3,6 @@ import stat
 from pathlib import Path
 
 import pytest
-
 from server.secret_store import SECRET_FILENAME, load_or_create_session_secret
 
 
@@ -43,6 +42,10 @@ def test_truncated_file_is_replaced(tmp_path: Path) -> None:
     assert len(secret) == 64
 
 
+# The guard belongs on this one: root writes through mode 0500, so under root the
+# assertion below fails. It used to sit on a near-duplicate that asserted nothing, which
+# meant the no-op skipped and the real test failed.
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignora los permisos del directorio")
 def test_read_only_directory_degrades_to_ephemeral(tmp_path: Path) -> None:
     """A badly mounted volume still boots; it only loses sessions on restart."""
     target = tmp_path / "ro"
@@ -55,14 +58,3 @@ def test_read_only_directory_degrades_to_ephemeral(tmp_path: Path) -> None:
 
     assert source == "ephemeral"
     assert len(secret) == 64
-
-
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignora los permisos del directorio")
-def test_read_only_directory_does_not_raise(tmp_path: Path) -> None:
-    target = tmp_path / "ro2"
-    target.mkdir()
-    target.chmod(0o500)
-    try:
-        load_or_create_session_secret(target)
-    finally:
-        target.chmod(0o700)

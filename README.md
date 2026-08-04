@@ -35,7 +35,7 @@
 </div>
 
 <p align="center">
-  <img src="./web/public/assets/dashboard.gif" alt="dashboard" width="auto" height="auto">
+  <img src="./docs/dashboard.gif" alt="dashboard" width="auto" height="auto">
 </p>
 
 
@@ -135,7 +135,7 @@ Everything is optional. Copy [`.env.example`](./.env.example) to `.env` next to 
 | `TZ` | `UTC` | Container timezone — the one scheduled tasks run on. |
 | `PUBLIC_URL` | (unset) | Only behind a reverse proxy. An `https://` value marks the session cookie `Secure` and makes the login rate limit read `X-Forwarded-For`. |
 
-Everything that used to be configurable — the session secret, the cookie's `SameSite`, CORS origins, command timeouts, the login rate limit, the static files path — is now either generated automatically or a constant with a sensible value. If you had `DOCKER_ROOT_PATH` in an older `.env`, it still works: it is read as an alias of `STACKS_PATH`. `DATA_DIR` also exists, but it is internal: the container fixes it to `/app/data` and `make dev-server` points it at `.devdata`. It is not part of the four and there is no reason to set it.
+Everything that used to be configurable — the session secret, the cookie's `SameSite`, CORS origins, command timeouts, the login rate limit, the static files path — is now either generated automatically or a constant with a sensible value. If you had `DOCKER_ROOT_PATH` or `PROJECTS_ROOT` in an older `.env`, they still work: both are read as aliases of `STACKS_PATH`, in that order of precedence. `DATA_DIR` also exists, but it is internal: the container fixes it to `/app/data` and `make dev-server` points it at `.devdata`. It is not part of the four and there is no reason to set it. (`PULLPILOT_TESTING` is read too, but only by the test suite, to swap SQLite for an in-memory database.)
 
 ---
 

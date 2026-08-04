@@ -19,7 +19,8 @@ export default function Header({
         <div className="flex items-center gap-3">
           <img
             src="/assets/logo.png"
-            alt="PullPilot Logo"
+            alt=""
+            aria-hidden="true"
             className="w-8 h-8 md:w-10 md:h-10 object-contain"
           />
 
@@ -31,20 +32,32 @@ export default function Header({
 
         <div className="flex items-center gap-2 md:gap-4">
           {isMockMode && (
-            <span className="hidden lg:inline-flex items-center gap-1 text-xs font-mono bg-yellow-100 text-yellow-800 px-2 py-1 rounded border border-yellow-200">
-              <AlertTriangle size={12} /> {t("app.demo_mode")}
+            /* Visible on a phone too: hidden behind lg: the badge defeated its own
+               purpose, leaving no sign that the projects on screen were invented. */
+            <span className="inline-flex items-center gap-1 text-xs font-mono bg-yellow-100 text-yellow-800 px-2 py-1 rounded border border-yellow-200">
+              <AlertTriangle size={12} aria-hidden="true" />
+              <span className="hidden lg:inline">{t("app.demo_mode")}</span>
+              <span className="lg:hidden">{t("app.demo_mode_short")}</span>
             </span>
           )}
 
-          <nav className="hidden sm:flex gap-1 bg-slate-100 p-1 rounded-lg">
+          {/* aria-current, not role="tablist": the active tab was conveyed by background
+              colour alone and no assistive tech could tell which view was showing. A real
+              tablist also promises arrow-key navigation, which these buttons do not do. */}
+          <nav
+            aria-label={t("nav.sections")}
+            className="hidden sm:flex gap-1 bg-slate-100 p-1 rounded-lg"
+          >
             {["dashboard", "schedule", "history"].map((tab) => (
               <button
                 key={tab}
+                type="button"
+                aria-current={activeTab === tab ? "page" : undefined}
                 onClick={() => onChangeTab(tab)}
                 className={`px-3 py-1.5 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-all ${
                   activeTab === tab
                     ? "bg-white text-blue-600 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
+                    : "text-slate-600 hover:text-slate-800"
                 }`}
               >
                 {t(`nav.${tab}`)}
@@ -83,16 +96,24 @@ export default function Header({
         </div>
       </header>
 
-      <div className="sm:hidden px-4 py-2 bg-white border-b border-slate-200 sticky top-[60px] z-10">
-        <nav className="flex gap-1 bg-slate-100 p-1 rounded-lg justify-between">
+      {/* No hardcoded top-[60px]: the header height is content-derived, so the magic
+          number left a sliver of scrolling content showing through the seam and broke
+          outright at larger font sizes. */}
+      <div className="sm:hidden px-4 py-2 bg-white border-b border-slate-200 sticky top-0 z-10">
+        <nav
+          aria-label={t("nav.sections")}
+          className="flex gap-1 bg-slate-100 p-1 rounded-lg justify-between"
+        >
           {["dashboard", "schedule", "history"].map((tab) => (
             <button
               key={tab}
+              type="button"
+              aria-current={activeTab === tab ? "page" : undefined}
               onClick={() => onChangeTab(tab)}
               className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
                 activeTab === tab
                   ? "bg-white text-blue-600 shadow-sm"
-                  : "text-slate-500 hover:text-slate-700"
+                  : "text-slate-600 hover:text-slate-800"
               }`}
             >
               {t(`nav.${tab}`)}

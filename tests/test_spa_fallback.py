@@ -9,7 +9,6 @@ happened as done. Hence the fake static directory here.
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-
 from server.app import register_spa_fallback
 
 INDEX_HTML = "<!doctype html><title>PullPilot</title><div id=root></div>"

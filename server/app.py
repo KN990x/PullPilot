@@ -81,8 +81,11 @@ async def lifespan(_: FastAPI):
         row = auth_service.get_credentials(db)
         configured = row is not None
         token_version = row.token_version if row else 0
+        username = row.username if row else None
 
-    auth_state.prime(configured=configured, token_version=token_version)
+    auth_state.prime(
+        configured=configured, token_version=token_version, username=username
+    )
     if not configured:
         logger.info(
             "Sin credenciales: al abrir la interfaz se mostrará el asistente de "
@@ -152,9 +155,13 @@ async def auth_middleware(request: Request, call_next):
             )
         return await call_next(request)
 
+    # The username is compared, not just its presence: token_version restarts at 1 when
+    # the credentials are wiped and the wizard is run again (the recovery the README
+    # documents), so a cookie from the previous account used to walk straight through
+    # while /api/auth/status — which does compare it — reported nobody logged in.
     user = request.session.get("user")
     version = request.session.get("v")
-    if not user or version != snapshot.token_version:
+    if not user or user != snapshot.username or version != snapshot.token_version:
         request.session.clear()
         if _requires_session(path):
             return JSONResponse(
@@ -178,7 +185,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
             status_code=422,
             content={"detail": errors, "code": "validation_error"},
         )
-    return JSONResponse(status_code=422, content={"detail": errors})
+    # `code` is part of the error envelope everywhere else, and the SPA keys its i18n off
+    # it; without it a malformed request showed the raw Pydantic message.
+    return JSONResponse(
+        status_code=422, content={"detail": errors, "code": "validation_error"}
+    )
 
 
 app.add_middleware(
