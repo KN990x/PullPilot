@@ -74,7 +74,7 @@ def test_second_concurrent_update_gets_409(
         worker.join(timeout=5)
 
     assert second.status_code == 409
-    assert first["status"] == 200
+    assert first["status"] == 202
 
 
 def test_the_slot_is_free_again_afterwards(
@@ -87,5 +87,5 @@ def test_the_slot_is_free_again_afterwards(
         lambda name, db, *, locale="es": (True, ["ok"]),
     )
 
-    assert client.post("/api/projects/plex/update").status_code == 200
-    assert client.post("/api/projects/plex/update").status_code == 200
+    assert client.post("/api/projects/plex/update").status_code == 202
+    assert client.post("/api/projects/plex/update").status_code == 202

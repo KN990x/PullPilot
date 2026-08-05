@@ -12,6 +12,7 @@ from server.config import LOG_LOCALE, logger
 from server.database import SessionLocal
 from server.locale.log_messages import t
 from server.models.db import ProjectSettings, ScheduledTask
+from server.services import update_state
 from server.services.docker import run_command
 from server.services.locks import ProjectBusyError, project_update_slot
 from server.services.projects import compose_stack_allowed, update_single_project_logic
@@ -39,6 +40,10 @@ def snapshot_global_update_status() -> dict[str, object]:
 
     Under the lock as well as copied: the job thread mutates these fields between our
     reads, which is how a snapshot could report `current` past `total`.
+
+    `projects` rides along so the SPA learns about both kinds of update from the one
+    endpoint it already polls every second, rather than needing a second poll loop for the
+    per-project deploys that now run in the background.
     """
     with _status_lock:
         s = global_update_status
@@ -47,13 +52,17 @@ def snapshot_global_update_status() -> dict[str, object]:
             processed_copy: list[object] = list(processed)
         else:
             processed_copy = []
-        return {
+        snapshot = {
             "is_running": s["is_running"],
             "total": s["total"],
             "current": s["current"],
             "current_project": s["current_project"],
             "processed": processed_copy,
         }
+    # Outside `_status_lock`: update_state has its own, and nesting two locks in a fixed
+    # order here for no reason is how deadlocks start.
+    snapshot["projects"] = update_state.snapshot()
+    return snapshot
 
 
 def trigger_is_past(trigger: CronTrigger | DateTrigger) -> bool:
@@ -275,6 +284,19 @@ def _run_job(target: str) -> None:
         if not project or not compose_stack_allowed(Path(project.path)):
             logger.warning(
                 "Omitiendo tarea programada %s: no existe en BD o la ruta no es un stack compose valido.",
+                target,
+            )
+            return
+
+        # `excluded` means "never update this automatically", not "skip it in the global
+        # run": global_update_job already filters on it and the dashboard disables the
+        # manual button for it, so a per-project schedule was the one path that still
+        # updated a stack the user had explicitly fenced off. Logged rather than written
+        # to the history, like the ProjectBusyError below: a schedule that can never run
+        # is a property of the schedule, and the UI flags it in the schedules table.
+        if project.excluded:
+            logger.warning(
+                "Omitiendo tarea programada %s: el proyecto está marcado como excluido.",
                 target,
             )
             return

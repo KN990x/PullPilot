@@ -1,6 +1,13 @@
 import { CheckCircle2, Loader2, Save, X } from "lucide-react";
 
 import { useFocusTrap } from "../hooks/useFocusTrap";
+import {
+  PASSWORD_MAX_LEN,
+  PASSWORD_MIN_LEN,
+  USERNAME_MAX_LEN,
+  USERNAME_MIN_LEN,
+} from "../lib/authPolicy";
+
 
 const INPUT_CLASS =
   "w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all text-slate-700";
@@ -107,8 +114,8 @@ export default function AccountModal({
               type="text"
               autoComplete="username"
               defaultValue={username ?? ""}
-              minLength={3}
-              maxLength={64}
+              minLength={USERNAME_MIN_LEN}
+              maxLength={USERNAME_MAX_LEN}
               className={INPUT_CLASS}
             />
           </div>
@@ -122,8 +129,8 @@ export default function AccountModal({
               name="new_password"
               type="password"
               autoComplete="new-password"
-              minLength={8}
-              maxLength={128}
+              minLength={PASSWORD_MIN_LEN}
+              maxLength={PASSWORD_MAX_LEN}
               className={INPUT_CLASS}
             />
           </div>
@@ -137,8 +144,8 @@ export default function AccountModal({
               name="new_password_confirm"
               type="password"
               autoComplete="new-password"
-              minLength={8}
-              maxLength={128}
+              minLength={PASSWORD_MIN_LEN}
+              maxLength={PASSWORD_MAX_LEN}
               className={INPUT_CLASS}
             />
           </div>

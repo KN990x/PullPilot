@@ -21,10 +21,14 @@ export default function Dashboard({
   projectsLoading,
   progress,
   updatingProjects,
+  onRefresh,
   onUpdateAll,
   onUpdateProject,
   onToggleSetting,
 }) {
+  // What "Update All" will actually do. Disabling only on an empty list meant that with
+  // everything excluded the dialog asked to confirm updating zero projects.
+  const updatableCount = projects.filter((project) => !project.excluded).length;
   // Skeletons, not the empty state: rendering the "no projects detected, check your
   // STACKS_PATH" panel while the first scan is in flight told the user their setup was
   // broken every single time they opened the dashboard.
@@ -54,19 +58,38 @@ export default function Dashboard({
             {t("status.active", { count: projects.filter((p) => p.status === "running").length })}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onUpdateAll}
-          disabled={progress.is_running || projects.length === 0}
-          className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg shadow-md transition-all active:scale-95 font-medium disabled:opacity-70 disabled:cursor-not-allowed"
-        >
-          {progress.is_running ? (
-            <Loader2 size={20} className="animate-spin" aria-hidden="true" />
-          ) : (
-            <RefreshCw size={20} aria-hidden="true" />
-          )}
-          {progress.is_running ? t("status.updating") : t("status.update_all")}
-        </button>
+        <div className="flex w-full md:w-auto items-center gap-2">
+          {/* The dashboard had no way to refresh: projects were loaded on mount and after
+              an update, so a stack that died outside PullPilot stayed green until a full
+              page reload. The history tab has had this button all along. */}
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={projectsLoading || progress.is_running}
+            aria-label={t("status.refresh_projects")}
+            title={t("status.refresh_projects")}
+            className="shrink-0 p-3 text-blue-700 bg-white border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw
+              size={20}
+              className={projectsLoading ? "animate-spin" : ""}
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            onClick={onUpdateAll}
+            disabled={progress.is_running || updatableCount === 0}
+            className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg shadow-md transition-all active:scale-95 font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {progress.is_running ? (
+              <Loader2 size={20} className="animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw size={20} aria-hidden="true" />
+            )}
+            {progress.is_running ? t("status.updating") : t("status.update_all")}
+          </button>
+        </div>
       </div>
 
       {projects.length === 0 ? (

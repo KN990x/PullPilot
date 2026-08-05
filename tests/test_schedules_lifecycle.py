@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from server.config import HISTORY_RETENTION
 from server.database import SessionLocal, session_scope
-from server.models.db import ScheduledTask, UpdateLog
+from server.models.db import ProjectSettings, ScheduledTask, UpdateLog
 from server.routers.schedules import _normalize_date_expression
 from server.services.scheduler import refresh_scheduler_jobs, retire_one_shot_task
 from server.services.update_logs import persist_update_log
@@ -190,3 +190,71 @@ def test_expired_one_shot_rows_are_retired_on_refresh(client: TestClient) -> Non
     refresh_scheduler_jobs()
 
     assert client.get("/api/schedules").json() == []
+
+
+def test_a_scheduled_task_skips_an_excluded_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """`excluded` means "never update this automatically", on every path.
+
+    The global job filtered on it and the dashboard disabled the manual button, but a
+    per-project schedule went straight through and updated the stack anyway.
+    """
+    import server.services.scheduler as scheduler_module
+
+    stack = tmp_path / "plex"
+    stack.mkdir()
+    (stack / "docker-compose.yml").write_text("services: {}\n")
+
+    with session_scope() as db:
+        db.add(ProjectSettings(name="plex", path=str(stack), excluded=True))
+        db.commit()
+
+    monkeypatch.setattr(scheduler_module, "compose_stack_allowed", lambda _path: True)
+
+    called: list[str] = []
+
+    def _never(name, db, *, locale="es"):
+        called.append(name)
+        return True, []
+
+    monkeypatch.setattr(scheduler_module, "update_single_project_logic", _never)
+
+    scheduler_module._run_job("plex")
+
+    assert called == [], "an excluded project was updated by its schedule"
+    # And nothing is written to the history: a schedule that can never run is a property
+    # of the schedule, which the UI flags in the schedules table.
+    with session_scope() as db:
+        assert db.query(UpdateLog).count() == 0
+
+
+def test_a_scheduled_task_still_runs_for_a_project_that_is_not_excluded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The guard above must not swallow the ordinary case."""
+    import server.services.scheduler as scheduler_module
+
+    stack = tmp_path / "pihole"
+    stack.mkdir()
+    (stack / "docker-compose.yml").write_text("services: {}\n")
+
+    with session_scope() as db:
+        db.add(ProjectSettings(name="pihole", path=str(stack), excluded=False))
+        db.commit()
+
+    monkeypatch.setattr(scheduler_module, "compose_stack_allowed", lambda _path: True)
+
+    called: list[str] = []
+
+    def _ok(name, db, *, locale="es"):
+        called.append(name)
+        return True, ["done"]
+
+    monkeypatch.setattr(scheduler_module, "update_single_project_logic", _ok)
+
+    scheduler_module._run_job("pihole")
+
+    assert called == ["pihole"]
+    with session_scope() as db:
+        assert db.query(UpdateLog).count() == 1

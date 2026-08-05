@@ -15,9 +15,12 @@ export default function ProjectCard({
   // list render produces, which Dashboard already does.
   return (
     <div
+      // No `pointer-events-none`: every control inside is already `disabled`, and the
+      // blanket rule also took away selecting the stack name and reading the tooltips —
+      // on every card, for as long as any global update ran.
       className={`bg-white rounded-xl border shadow-sm transition-all duration-200
         ${project.excluded ? "opacity-60 border-slate-200 bg-slate-50" : "border-slate-200"}
-        ${isLocked ? "opacity-60 pointer-events-none select-none grayscale-[0.5]" : "hover:shadow-md"}
+        ${isLocked ? "opacity-60 grayscale-[0.5]" : "hover:shadow-md"}
       `}
     >
       <div className="p-5 border-b border-slate-100 flex justify-between items-start">
@@ -30,6 +33,9 @@ export default function ProjectCard({
             </span>
           ) : (
             <div className="flex items-center gap-2 mt-1">
+              {/* `stopped` is slate, not red: a stack you took down on purpose and one
+                  whose status could not be read are different things, and the dot is what
+                  gets scanned first. Red is reserved for the one that needs looking at. */}
               <span
                 aria-hidden="true"
                 className={`w-2 h-2 rounded-full ${
@@ -37,7 +43,9 @@ export default function ProjectCard({
                     ? "bg-green-500"
                     : project.status === "partial"
                       ? "bg-yellow-500"
-                      : "bg-red-500"
+                      : project.status === "stopped"
+                        ? "bg-slate-400"
+                        : "bg-red-500"
                 }`}
               />
               {/* Translated, and at slate-600: the raw backend literal meant a Spanish

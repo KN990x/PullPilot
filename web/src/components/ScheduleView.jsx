@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { Calendar, ChevronRight, Clock, Plus, Shield, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Calendar,
+  ChevronRight,
+  Clock,
+  Loader2,
+  Plus,
+  Shield,
+  Trash2,
+} from "lucide-react";
 
 const LABEL_CLASS = "text-xs font-bold text-slate-600 uppercase tracking-wide";
 const CONTROL_CLASS =
@@ -20,12 +29,31 @@ export default function ScheduleView({
   selectedFreq,
   onSelectedFreqChange,
   onCreateSchedule,
+  creating,
   projects,
   schedules,
   onDeleteSchedule,
   formatExpression,
 }) {
   const [taskType, setTaskType] = useState("cron");
+
+  /**
+   * Why a task will never fire, or null when it will.
+   *
+   * The scheduler skips both cases with a line in the container log that nobody reads,
+   * so the UI listed them as active forever. Only checked once the projects are in:
+   * an empty list is the scan still running, not every stack having vanished.
+   */
+  const blockedReason = (target) => {
+    if (target === "GLOBAL" || projects.length === 0) {
+      return null;
+    }
+    const project = projects.find((candidate) => candidate.name === target);
+    if (!project) {
+      return t("schedule.warn_missing_project");
+    }
+    return project.excluded ? t("schedule.warn_excluded_project") : null;
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
@@ -68,9 +96,18 @@ export default function ScheduleView({
             <div className="relative">
               <select id="schedule-target" name="target" className={CONTROL_CLASS}>
                 <option value="GLOBAL">{t("schedule.target_global")}</option>
+                {/* Excluded projects are listed but not selectable: the scheduler skips
+                    them, so offering one as a target only creates a task that can never
+                    run. Shown rather than hidden so the reason is visible. */}
                 {projects.map((project) => (
-                  <option key={project.name} value={project.name}>
-                    {project.name}
+                  <option
+                    key={project.name}
+                    value={project.name}
+                    disabled={project.excluded}
+                  >
+                    {project.excluded
+                      ? t("schedule.target_excluded", { name: project.name })
+                      : project.name}
                   </option>
                 ))}
               </select>
@@ -129,6 +166,9 @@ export default function ScheduleView({
                   name="day_of_month"
                   className={CONTROL_CLASS}
                 >
+                  {/* 28, not 31, even though the schema accepts up to 31: a monthly task
+                      on the 31st simply does not fire in seven months of the year, and a
+                      schedule that silently skips is worse than one you cannot pick. */}
                   {[...Array(28)].map((_, index) => (
                     <option key={index + 1} value={index + 1}>
                       {index + 1}
@@ -200,11 +240,23 @@ export default function ScheduleView({
             </div>
           )}
 
+          {/* Disabled while the request is in flight: two clicks used to create two
+              identical tasks, and nothing downstream deduplicates them. */}
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white p-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md h-[46px]"
+            disabled={creating}
+            className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-60 disabled:active:scale-100 disabled:cursor-not-allowed text-white p-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md h-[46px]"
           >
-            <Plus size={18} aria-hidden="true" /> {t("schedule.create_btn")}
+            {creating ? (
+              <>
+                <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+                {t("schedule.creating")}
+              </>
+            ) : (
+              <>
+                <Plus size={18} aria-hidden="true" /> {t("schedule.create_btn")}
+              </>
+            )}
           </button>
         </form>
       </div>
@@ -240,7 +292,9 @@ export default function ScheduleView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {schedules.map((schedule) => (
+                {schedules.map((schedule) => {
+                  const blocked = blockedReason(schedule.target);
+                  return (
                   <tr key={schedule.id} className="hover:bg-slate-50 group transition-colors">
                     <td className="p-4 font-bold text-slate-800">
                       {schedule.target === "GLOBAL" ? (
@@ -249,7 +303,19 @@ export default function ScheduleView({
                           {t("schedule.target_global")}
                         </span>
                       ) : (
-                        schedule.target
+                        <span className="flex flex-col gap-1">
+                          <span>{schedule.target}</span>
+                          {blocked && (
+                            <span className="inline-flex items-start gap-1 text-xs font-normal text-amber-700">
+                              <AlertTriangle
+                                size={13}
+                                className="shrink-0 mt-0.5"
+                                aria-hidden="true"
+                              />
+                              {blocked}
+                            </span>
+                          )}
+                        </span>
                       )}
                     </td>
                     <td className="p-4 font-mono text-slate-600 text-xs md:text-sm">
@@ -269,7 +335,8 @@ export default function ScheduleView({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -24,9 +24,17 @@ export function usePolling() {
         return;
       }
       inFlightRef.current = true;
-      Promise.resolve(callbackRef.current()).finally(() => {
-        inFlightRef.current = false;
-      });
+      // The .catch is not decoration: without it a callback that rejects produces an
+      // unhandled rejection, and the tick would keep firing against a caller that has
+      // no idea its last run failed. Callers are expected to handle their own errors;
+      // this is the backstop that keeps the interval honest.
+      Promise.resolve(callbackRef.current())
+        .catch((error) => {
+          console.error("Polling callback failed", error);
+        })
+        .finally(() => {
+          inFlightRef.current = false;
+        });
     }, intervalMs);
   }, []);
 

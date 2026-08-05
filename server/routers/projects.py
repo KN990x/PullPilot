@@ -1,6 +1,6 @@
 from typing import Callable, List, Literal, TypeVar
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -11,7 +11,8 @@ from server.locale.http import get_request_locale
 from server.locale.log_messages import t
 from server.models.db import ProjectSettings
 from server.models.schemas import Project
-from server.services.locks import ProjectBusyError, project_update_slot
+from server.services import update_state
+from server.services.locks import release_project_slot, try_acquire_project_slot
 from server.services.projects import scan_projects_logic, update_single_project_logic
 from server.services.update_logs import persist_update_log
 
@@ -53,9 +54,37 @@ async def get_projects():
     return await _run_in_session(scan_projects_logic)
 
 
-@router.post("/projects/{name}/update")
-async def update_project(name: str, locale: str = Depends(get_request_locale)):
-    def work(db: Session):
+def _run_update_in_background(name: str, locale: str) -> None:
+    """Deploy the stack and record how it went. Owns the slot the endpoint took.
+
+    Its own session: the request's is long closed by the time this runs.
+    """
+    success = False
+    try:
+        with session_scope() as db:
+            success = _run_update(name, db, locale)
+    except Exception:
+        # Nothing is left to raise to — the 202 went out long ago — so an unhandled error
+        # here would surface only as "Exception in ASGI application" while the SPA polled
+        # a `running` entry that never resolved. Same reasoning as global_update_job.
+        logger.exception("La actualización de %s terminó con una excepción.", name)
+    finally:
+        update_state.mark_finished(name, success=success)
+        release_project_slot(name)
+
+
+@router.post("/projects/{name}/update", status_code=202)
+async def update_project(
+    name: str,
+    background_tasks: BackgroundTasks,
+    locale: str = Depends(get_request_locale),
+):
+    """Start the deploy and answer straight away; the SPA follows it on /update-status.
+
+    It used to run inline, holding the connection open for the whole thing.
+    """
+
+    def work(db: Session) -> None:
         # Existence first: taking the slot for a name that is not a project answered 500,
         # wrote an ERROR row into the history and created a lock entry that was never
         # collected. The sibling toggle endpoints already answered 404 here.
@@ -68,20 +97,27 @@ async def update_project(name: str, locale: str = Depends(get_request_locale)):
             )
 
         # Then the slot: two requests on the same stack used to overlap, taking the same
-        # containers down and up at once.
-        try:
-            with project_update_slot(name):
-                return _run_update(name, db, locale)
-        except ProjectBusyError:
+        # containers down and up at once. Taken here and released by the background task,
+        # so the answer cannot be 202 for an update that never gets to start.
+        if not try_acquire_project_slot(name):
             raise HTTPException(
                 status_code=409,
                 detail=t("http.update_in_progress", locale),
-            ) from None
+            )
+        update_state.mark_running(name)
 
-    return await _run_in_session(work)
+    await _run_in_session(work)
+    background_tasks.add_task(_run_update_in_background, name, locale)
+    return {"status": "accepted", "name": name}
 
 
-def _run_update(name: str, db: Session, locale: str) -> dict:
+def _run_update(name: str, db: Session, locale: str) -> bool:
+    """Deploy and write the history row. Returns whether the deploy worked.
+
+    A bool rather than an HTTP answer: this runs after the 202, so there is no response
+    left to put a status code on. The logs live in the history row, which is where the UI
+    reads them from anyway.
+    """
     success, logs = update_single_project_logic(name, db, locale=locale)
 
     status_word = t("log.status_ok", locale) if success else t("log.status_error", locale)
@@ -94,17 +130,14 @@ def _run_update(name: str, db: Session, locale: str) -> dict:
             details={name: logs},
         )
     except SQLAlchemyError:
-        # Not fatal to the request: the stack has already been pulled, recreated and
-        # health-checked. Answering 500 here reported a working deploy as failed and
-        # invited the user to run the whole thing again.
+        # Not fatal: the stack has already been pulled, recreated and health-checked, so
+        # failing to write the row does not make the deploy a failure.
         logger.error("No se pudo guardar el historial de %s.", name)
-        logs = [*logs, t("http.history_save_failed", locale)]
 
     if not success:
         logger.error("Actualización fallida para %s:\n%s", name, "\n".join(logs))
-        raise HTTPException(status_code=500, detail=t("http.update_failed", locale))
 
-    return {"success": success, "logs": logs}
+    return success
 
 
 @router.post("/projects/{name}/toggle_exclude")

@@ -6,7 +6,8 @@ import server.services.projects as projects_module
 from fastapi.testclient import TestClient
 from server.database import SessionLocal
 from server.locale.log_messages import t
-from server.models.db import ProjectSettings
+from server.models.db import ProjectSettings, UpdateLog
+from server.services import locks
 from server.services.update_logs import persist_update_log
 
 
@@ -156,7 +157,9 @@ def test_update_passes_locale_to_logic(
         "/api/projects/any/update",
         headers={"Accept-Language": "en"},
     )
-    assert r.status_code == 200
+    # 202: the deploy runs as a BackgroundTask, which TestClient drives to completion
+    # before handing the response back.
+    assert r.status_code == 202
     assert seen.get("locale") == "en"
 
 
@@ -168,26 +171,58 @@ def test_update_of_an_unknown_project_is_404(client: TestClient) -> None:
     assert client.get("/api/history").json() == []
 
 
-def test_update_failed_detail_english(
+def test_a_failed_update_is_reported_through_the_status_endpoint(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
 ) -> None:
+    """The deploy no longer decides the HTTP status: it has already been sent.
+
+    202 says the work started. Whether it worked comes back on /update-status, which the
+    SPA polls, and in the history row that carries the logs.
+    """
     make_project("x")
     monkeypatch.setattr(
         projects_router_module,
         "update_single_project_logic",
-        lambda _n, _db, **kw: (False, []),
+        lambda _n, _db, **kw: (False, ["boom"]),
     )
 
-    r = client.post(
-        "/api/projects/x/update",
-        headers={"Accept-Language": "en"},
+    assert client.post("/api/projects/x/update").status_code == 202
+
+    assert client.get("/api/update-status").json()["projects"]["x"] == "error"
+    history = client.get("/api/history").json()
+    assert len(history) == 1
+    assert history[0]["status"] == "ERROR"
+
+
+def test_a_successful_update_reports_success_and_frees_the_slot(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_project
+) -> None:
+    make_project("y")
+    monkeypatch.setattr(
+        projects_router_module,
+        "update_single_project_logic",
+        lambda _n, _db, **kw: (True, ["ok"]),
     )
-    assert r.status_code == 500
-    detail = r.json().get("detail", "")
-    # Compared against the Spanish string rather than by keyword: "la UI" also contains
-    # "ui", so the old `"history" in d or "ui" in d` passed even when Spanish came back.
-    assert detail == t("http.update_failed", "en")
-    assert detail != t("http.update_failed", "es")
+
+    assert client.post("/api/projects/y/update").status_code == 202
+    assert client.get("/api/update-status").json()["projects"]["y"] == "success"
+    # The slot is the background task's to release: leaking it would 409 every later run.
+    assert locks.is_busy("y") is False
+    assert client.post("/api/projects/y/update").status_code == 202
+
+
+def test_a_second_update_while_one_runs_is_409(client: TestClient, make_project) -> None:
+    """The slot is taken by the request and released by the task, so a double click on the
+    same stack cannot get two 202s and two overlapping deploys."""
+    make_project("z")
+
+    assert locks.try_acquire_project_slot("z")
+    try:
+        response = client.post("/api/projects/z/update")
+        assert response.status_code == 409
+        assert response.json()["detail"] == t("http.update_in_progress", "es")
+    finally:
+        locks.release_project_slot("z")
 
 
 def test_create_schedule_rejects_unschedulable_date(client: TestClient) -> None:
@@ -286,10 +321,15 @@ def test_update_rejects_project_path_outside_projects_root(
         "/api/projects/myapp/update",
         headers={"Accept-Language": "es"},
     )
-    assert response.status_code == 500
-    detail = response.json().get("detail", "")
-    assert "historial" in detail.lower()
-    assert "STACKS_PATH" not in detail
+    # 202 only says the work was queued. The containment check runs inside it and fails
+    # the deploy, which is what /update-status and the history row report.
+    assert response.status_code == 202
+    assert "STACKS_PATH" not in response.text
+
+    assert client.get("/api/update-status").json()["projects"]["myapp"] == "error"
+    history = client.get("/api/history").json()
+    assert len(history) == 1
+    assert history[0]["status"] == "ERROR"
 
 
 def test_update_project_failure_hides_internal_logs_in_http_detail(
@@ -305,7 +345,9 @@ def test_update_project_failure_hides_internal_logs_in_http_detail(
     )
 
     response = client.post("/api/projects/anything/update")
-    assert response.status_code == 500
+    assert response.status_code == 202
+    # The 202 body is an acknowledgement, not a report: the logs live in the history row,
+    # behind the session, rather than in the answer to the request that started the work.
     assert "INTERNAL_DOCKER" not in response.text
 
 
@@ -516,3 +558,201 @@ def test_history_can_be_paged_past_the_first_twenty(client: TestClient) -> None:
     assert len(client.get("/api/history?limit=25").json()) == 25
     assert len(client.get("/api/history?limit=20&offset=20").json()) == 5
     assert client.get("/api/history?limit=0").status_code == 422
+
+
+def test_update_all_is_rejected_while_one_is_running(client: TestClient) -> None:
+    """The endpoint used to answer 200 "started" for a run it never launched.
+
+    `global_update_job` returns after one log line when it cannot take the lock, so the SPA
+    was told an update had begun and drew a progress bar for it.
+    """
+    from server.services.scheduler import global_update_lock
+
+    assert global_update_lock.acquire(blocking=False)
+    try:
+        response = client.post("/api/update-all")
+        assert response.status_code == 409
+        assert response.json()["detail"] == t("http.update_all_in_progress", "es")
+    finally:
+        global_update_lock.release()
+
+    # Released again: the next caller gets through.
+    assert client.post("/api/update-all").status_code == 200
+
+
+def test_history_pages_do_not_repeat_rows_sharing_a_timestamp(
+    client: TestClient,
+) -> None:
+    """Ordering by timestamp alone left rows written in the same instant unordered.
+
+    A row whose position is up to SQLite is one that can cross a page boundary and be
+    served twice, or never.
+    """
+    stamp = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
+    db = SessionLocal()
+    try:
+        for n in range(30):
+            db.add(UpdateLog(timestamp=stamp, status="SUCCESS", summary=f"run {n}", details="{}"))
+        db.commit()
+    finally:
+        db.close()
+
+    first = [row["id"] for row in client.get("/api/history?limit=10&offset=0").json()]
+    second = [row["id"] for row in client.get("/api/history?limit=10&offset=10").json()]
+    third = [row["id"] for row in client.get("/api/history?limit=10&offset=20").json()]
+
+    seen = first + second + third
+    assert len(seen) == 30
+    assert len(set(seen)) == 30, "a row was served on two different pages"
+    # Newest first, and with equal timestamps that is descending id.
+    assert seen == sorted(seen, reverse=True)
+
+
+def _cron_payload(target: str, *, hour: int = 4) -> dict:
+    return {
+        "target": target,
+        "task_type": "cron",
+        "frequency": "daily",
+        "hour": hour,
+        "minute": 0,
+    }
+
+
+def test_schedule_for_an_unknown_project_is_rejected(client: TestClient) -> None:
+    """It used to be accepted and then skipped at fire time with one line in the log.
+
+    The task sat in the list as active forever, promising a run that could never happen.
+    """
+    response = client.post("/api/schedules", json=_cron_payload("no-existe"))
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == t("http.schedule_target_unknown", "es")
+    assert client.get("/api/schedules").json() == []
+
+
+def test_schedule_for_an_excluded_project_is_rejected(
+    client: TestClient, make_project
+) -> None:
+    """`excluded` means never update automatically, so scheduling one is a contradiction."""
+    make_project("plex")
+    assert client.post("/api/projects/plex/toggle_exclude").status_code == 200
+
+    response = client.post("/api/schedules", json=_cron_payload("plex"))
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == t("http.schedule_target_excluded", "es")
+
+    # Un-excluding it makes the very same request work.
+    assert client.post("/api/projects/plex/toggle_exclude").status_code == 200
+    assert client.post("/api/schedules", json=_cron_payload("plex")).status_code == 200
+
+
+def test_an_identical_schedule_is_rejected(client: TestClient, make_project) -> None:
+    """Two identical rows are two jobs firing on the same stack in the same minute.
+
+    The table has no unique constraint and the form's submit guard only stops a double
+    click, not two deliberate creations.
+    """
+    make_project("plex")
+    assert client.post("/api/schedules", json=_cron_payload("plex")).status_code == 200
+
+    duplicate = client.post("/api/schedules", json=_cron_payload("plex"))
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == t("http.schedule_duplicate", "es")
+
+    # A different time is a different schedule, not a duplicate.
+    assert (
+        client.post("/api/schedules", json=_cron_payload("plex", hour=5)).status_code
+        == 200
+    )
+    assert len(client.get("/api/schedules").json()) == 2
+
+
+def test_the_global_target_never_needs_a_project_row(client: TestClient) -> None:
+    """GLOBAL is not a project name and must skip the existence check entirely."""
+    assert client.post("/api/schedules", json=_cron_payload("GLOBAL")).status_code == 200
+
+
+def _stack(root, name: str):
+    d = root / name
+    d.mkdir(parents=True)
+    (d / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+    return d
+
+
+def test_scan_retires_rows_for_stacks_that_are_gone(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """The projects table only ever grew, like the history and the lock registries did."""
+    root = tmp_path / "stacks"
+    _stack(root, "plex")
+    _stack(root, "pihole")
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(projects_module, "run_command", lambda *_a, **_kw: "")
+
+    assert len(client.get("/api/projects").json()) == 2
+
+    import shutil
+
+    shutil.rmtree(root / "pihole")
+
+    assert [p["name"] for p in client.get("/api/projects").json()] == ["plex"]
+    db = SessionLocal()
+    try:
+        assert db.query(ProjectSettings).filter_by(name="pihole").first() is None
+    finally:
+        db.close()
+
+
+def test_scan_keeps_a_gone_stack_that_still_carries_settings(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A row leaves `seen` for reasons other than the user deleting the stack.
+
+    A volume mounted at the wrong path, or a compose file missing for the seconds someone
+    is editing it, would otherwise silently clear the `excluded` flag on a stack the user
+    had deliberately fenced off — an unrecoverable change nobody asked for.
+    """
+    root = tmp_path / "stacks"
+    _stack(root, "plex")
+    _stack(root, "pihole")
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(projects_module, "run_command", lambda *_a, **_kw: "")
+
+    assert len(client.get("/api/projects").json()) == 2
+    assert client.post("/api/projects/pihole/toggle_exclude").status_code == 200
+
+    import shutil
+
+    shutil.rmtree(root / "pihole")
+    client.get("/api/projects")
+
+    db = SessionLocal()
+    try:
+        row = db.query(ProjectSettings).filter_by(name="pihole").first()
+        assert row is not None and row.excluded is True
+    finally:
+        db.close()
+
+
+def test_an_empty_scan_never_prunes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Finding nothing is the shape of a bad mount far more often than of an empty homelab."""
+    root = tmp_path / "stacks"
+    _stack(root, "plex")
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+    monkeypatch.setattr(projects_module, "run_command", lambda *_a, **_kw: "")
+
+    assert len(client.get("/api/projects").json()) == 1
+
+    import shutil
+
+    shutil.rmtree(root / "plex")
+
+    assert client.get("/api/projects").json() == []
+    db = SessionLocal()
+    try:
+        assert db.query(ProjectSettings).filter_by(name="plex").first() is not None
+    finally:
+        db.close()

@@ -1,6 +1,13 @@
 import { Loader2, ShieldCheck } from "lucide-react";
 
 import AuthLayout from "./AuthLayout";
+import {
+  PASSWORD_MAX_LEN,
+  PASSWORD_MIN_LEN,
+  USERNAME_MAX_LEN,
+  USERNAME_MIN_LEN,
+} from "../lib/authPolicy";
+
 
 const INPUT_CLASS =
   "w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all text-slate-700";
@@ -51,8 +58,8 @@ export default function SetupView({
             // eslint-disable-next-line jsx-a11y/no-autofocus -- single-purpose full-screen form, this field is the only thing on it
             autoFocus
             required
-            minLength={3}
-            maxLength={64}
+            minLength={USERNAME_MIN_LEN}
+            maxLength={USERNAME_MAX_LEN}
             className={INPUT_CLASS}
           />
           <span className={HINT_CLASS}>{t("setup.username_hint")}</span>
@@ -68,8 +75,8 @@ export default function SetupView({
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
-            maxLength={128}
+            minLength={PASSWORD_MIN_LEN}
+            maxLength={PASSWORD_MAX_LEN}
             className={INPUT_CLASS}
           />
           <span className={HINT_CLASS}>{t("setup.password_hint")}</span>
@@ -85,8 +92,8 @@ export default function SetupView({
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
-            maxLength={128}
+            minLength={PASSWORD_MIN_LEN}
+            maxLength={PASSWORD_MAX_LEN}
             className={INPUT_CLASS}
           />
         </div>
@@ -98,12 +105,12 @@ export default function SetupView({
         >
           {submitting ? (
             <>
-              <Loader2 size={20} className="animate-spin" />
+              <Loader2 size={20} className="animate-spin" aria-hidden="true" />
               {t("setup.submitting")}
             </>
           ) : (
             <>
-              <ShieldCheck size={20} />
+              <ShieldCheck size={20} aria-hidden="true" />
               {t("setup.submit")}
             </>
           )}

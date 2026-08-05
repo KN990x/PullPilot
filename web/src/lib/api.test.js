@@ -143,4 +143,24 @@ describe("request helpers", () => {
       "too short; bad chars"
     );
   });
+
+  it("gives every request a deadline so a hung backend cannot pin it forever", async () => {
+    // The case this exists for: PullPilot recreating its own container. Without a signal
+    // the promise never settles and usePolling's in-flight guard never clears.
+    fetch.mockResolvedValue(jsonResponse(200, []));
+
+    await fetchProjects({});
+
+    const [, options] = fetch.mock.calls[0];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("treats a timed-out request as an unreachable backend", () => {
+    // AbortSignal.timeout rejects with a DOMException named TimeoutError; the offline
+    // card is the right answer for it, not a red "server error" toast.
+    expect(isBackendUnreachableError(new DOMException("timed out", "TimeoutError"))).toBe(
+      true
+    );
+    expect(isBackendUnreachableError(new DOMException("aborted", "AbortError"))).toBe(true);
+  });
 });

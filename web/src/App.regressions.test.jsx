@@ -19,6 +19,8 @@ vi.mock("./lib/api", async () => {
     fetchUpdateStatus: vi.fn(),
     toggleProjectSetting: vi.fn(),
     triggerUpdateAll: vi.fn(),
+    updateProject: vi.fn(),
+    createSchedule: vi.fn(),
   };
 });
 
@@ -31,6 +33,9 @@ import {
   fetchSchedules,
   fetchUpdateStatus,
   toggleProjectSetting,
+  createSchedule,
+  triggerUpdateAll,
+  updateProject,
 } from "./lib/api";
 
 const t = i18n.getFixedT("es");
@@ -53,6 +58,7 @@ beforeEach(async () => {
   fetchSchedules.mockResolvedValue([]);
   fetchUpdateStatus.mockResolvedValue({ is_running: false, current: 0, total: 0 });
   toggleProjectSetting.mockResolvedValue(undefined);
+  updateProject.mockResolvedValue({ status: "accepted", name: "plex" });
 });
 
 afterEach(() => {
@@ -173,5 +179,158 @@ describe("language switching", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fetchProjects).toHaveBeenCalledTimes(1);
     expect(fetchHistory).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Update All when one is already running", () => {
+  it("says so instead of drawing a progress bar for a run it never started", async () => {
+    // The endpoint used to answer 200 for a job that returned after one log line, so the
+    // SPA faked `is_running` with a total of 1 and the first poll undid it.
+    const conflict = Object.assign(new Error("Request failed (409)"), { status: 409 });
+    triggerUpdateAll.mockRejectedValue(conflict);
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole("button", { name: t("status.update_all") }));
+    fireEvent.click(await screen.findByRole("button", { name: t("confirm.update_all_action") }));
+
+    expect(await screen.findByText(t("alerts.update_all_in_progress"))).toBeInTheDocument();
+    // No progress bar: the run is somebody else's.
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+});
+
+describe("a single-project update", () => {
+  it("does not wait for the deploy and reports the outcome from the poll", async () => {
+    // It used to await the whole thing: one HTTP request held open for minutes, which any
+    // proxy with a 60 s read timeout turned into a reported failure for a working deploy.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      fetchUpdateStatus
+        .mockResolvedValueOnce({ is_running: false, current: 0, total: 0, projects: {} })
+        .mockResolvedValue({
+          is_running: false,
+          current: 0,
+          total: 0,
+          projects: { plex: "success" },
+        });
+
+      render(<App />);
+      await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: t("card.update_project_named", { name: "plex" }) })
+      );
+
+      // The request is acknowledged immediately; nothing awaits the deploy.
+      await waitFor(() => expect(updateProject).toHaveBeenCalledWith("plex", expect.anything()));
+
+      await vi.advanceTimersByTimeAsync(1200);
+
+      expect(await screen.findByText(t("alerts.update_ok", { name: "plex" }))).toBeInTheDocument();
+      // The history row is written by the same background task, so it has to be reloaded:
+      // a per-project update used to write one and never show it.
+      await waitFor(() => expect(fetchHistory).toHaveBeenCalledTimes(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says the stack is busy when the backend refuses with 409", async () => {
+    updateProject.mockRejectedValue(
+      Object.assign(new Error("Request failed (409)"), { status: 409 })
+    );
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: t("card.update_project_named", { name: "plex" }) })
+    );
+
+    expect(await screen.findByText(t("alerts.update_in_progress"))).toBeInTheDocument();
+  });
+});
+
+describe("the history's second page", () => {
+  it("appends instead of replacing, and asks for the right offset", async () => {
+    // HISTORY_RETENTION keeps 200 rows and the endpoint has always paged; only the newest
+    // 20 were ever reachable because nothing sent limit/offset.
+    const page = (from) =>
+      Array.from({ length: 20 }, (_, i) => ({
+        id: from + i,
+        timestamp: "2026-08-05T10:00:00Z",
+        status: "SUCCESS",
+        summary: `run ${from + i}`,
+        details: "{}",
+      }));
+    fetchHistory.mockResolvedValueOnce(page(100)).mockResolvedValueOnce(page(80));
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    // Two nav bars are rendered, one for desktop and one for phones; either opens the tab.
+    fireEvent.click(screen.getAllByRole("button", { name: t("nav.history") })[0]);
+    expect(await screen.findByText("run 100")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: t("history.load_more") }));
+
+    await waitFor(() =>
+      expect(fetchHistory).toHaveBeenLastCalledWith(expect.anything(), {
+        limit: 20,
+        offset: 20,
+      })
+    );
+    // Both pages on screen: the first must not be thrown away.
+    expect(await screen.findByText("run 80")).toBeInTheDocument();
+    expect(screen.getByText("run 100")).toBeInTheDocument();
+  });
+});
+
+describe("the dashboard's own controls", () => {
+  it("can refresh the project list without reloading the page", async () => {
+    // Projects were loaded on mount and after an update and nowhere else, so a stack that
+    // died outside PullPilot stayed green until the tab was reloaded.
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: t("status.refresh_projects") }));
+
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not offer Update All when every project is excluded", async () => {
+    // It was disabled only on an empty list, so the dialog asked to confirm 0 projects.
+    fetchProjects.mockResolvedValue([{ ...PLEX, excluded: true }]);
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    expect(await screen.findByRole("button", { name: t("status.update_all") })).toBeDisabled();
+  });
+});
+
+describe("a schedule the backend refuses", () => {
+  it.each([
+    [409, "Ese proyecto está excluido: quita el interruptor 'Excluir' antes de programarlo."],
+    [404, "Ese proyecto no existe. Actualiza la lista de proyectos y vuelve a intentarlo."],
+  ])("shows the reason the server gave (%i)", async (status, detail) => {
+    // These used to be accepted and then skipped at fire time. Now they are refused, and
+    // the detail is already localised by the backend, so it is passed straight through
+    // rather than restated in i18n.js.
+    createSchedule.mockRejectedValue(Object.assign(new Error(detail), { status }));
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    fireEvent.click(screen.getAllByRole("button", { name: t("nav.schedule") })[0]);
+    // Submit the form, not the button: the handler reads FormData off event.target.
+    const submit = await screen.findByRole("button", { name: t("schedule.create_btn") });
+    fireEvent.submit(submit.closest("form"));
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    // The picker and the table warnings have to agree with the server again.
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(2));
   });
 });

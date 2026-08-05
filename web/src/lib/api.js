@@ -29,6 +29,13 @@ export function isBackendUnreachableError(error) {
   if (error instanceof TypeError) {
     return true;
   }
+  // A request we gave up on is a backend that is not answering, which is the case the
+  // offline card exists for. AbortSignal.timeout rejects with a DOMException named
+  // "TimeoutError"; `name` is checked rather than `instanceof` so it also holds for the
+  // plain object shapes the tests use.
+  if (error.name === "TimeoutError" || error.name === "AbortError") {
+    return true;
+  }
   const msg = typeof error.message === "string" ? error.message : "";
   return /failed to fetch|networkerror|load failed|network request failed/i.test(msg);
 }
@@ -73,11 +80,28 @@ function buildHeaders(options, context) {
   return headers;
 }
 
-async function request(path, options = {}, context = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
+// A hung backend is not hypothetical here: it is what PullPilot looks like from the
+// browser while it recreates its own container. Without a deadline the promise never
+// settles, usePolling's in-flight guard never clears and the progress bar freezes
+// forever instead of falling through to the offline card.
+const DEFAULT_TIMEOUT_MS = 30000;
+
+function withTimeout(options) {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...rest } = options;
+  // Callers never pass their own signal today; if one ever does, it wins and owns the
+  // deadline itself.
+  return rest.signal ? rest : { ...rest, signal: AbortSignal.timeout(timeoutMs) };
+}
+
+async function doFetch(path, options, context) {
+  return fetch(`${API_URL}${path}`, {
+    ...withTimeout(options),
     headers: buildHeaders(options, context),
   });
+}
+
+async function request(path, options = {}, context = {}) {
+  const response = await doFetch(path, options, context);
   await handleAuthError(response, context);
   return response;
 }
@@ -87,10 +111,7 @@ async function request(path, options = {}, context = {}) {
  * "wrong credentials", not "session expired".
  */
 async function publicRequestJson(path, options = {}, context = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: buildHeaders(options, context),
-  });
+  const response = await doFetch(path, options, context);
   await assertOk(response);
   return readJsonBody(response);
 }
@@ -102,10 +123,7 @@ async function publicRequestJson(path, options = {}, context = {}) {
  * Only the middleware's own codes trigger the redirect; the rest stay form errors.
  */
 async function sessionAwareRequestJson(path, options = {}, context = {}) {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: buildHeaders(options, context),
-  });
+  const response = await doFetch(path, options, context);
   if (response.status === 401) {
     const code = await peekErrorCode(response);
     if (code === "session_expired" || code === "setup_required") {
@@ -188,8 +206,20 @@ export function fetchProjects(context = {}) {
   return requestJson("/projects", {}, context);
 }
 
-export function fetchHistory(context = {}) {
-  return requestJson("/history", {}, context);
+/**
+ * `limit`/`offset` exist so the UI can reach past the newest 20. HISTORY_RETENTION keeps
+ * 200 rows and the endpoint has always paged; nothing ever asked it to.
+ */
+export function fetchHistory(context = {}, { limit, offset } = {}) {
+  const params = new URLSearchParams();
+  if (limit != null) {
+    params.set("limit", String(limit));
+  }
+  if (offset) {
+    params.set("offset", String(offset));
+  }
+  const query = params.toString();
+  return requestJson(`/history${query ? `?${query}` : ""}`, {}, context);
 }
 
 export function fetchSchedules(context = {}) {
@@ -205,6 +235,14 @@ export async function triggerUpdateAll(context = {}) {
   await assertOk(response);
 }
 
+/**
+ * Starts the deploy; it does not wait for it. The answer is a 202 acknowledgement and the
+ * outcome arrives through fetchUpdateStatus's `projects` map.
+ *
+ * It used to hold the request open for the whole thing — up to 300 s per command plus the
+ * healthcheck — which any reverse proxy with a 60 s read timeout turned into a reported
+ * failure for a deploy that had worked.
+ */
 export async function updateProject(name, context = {}) {
   const response = await request(
     `/projects/${projectSegment(name)}/update`,

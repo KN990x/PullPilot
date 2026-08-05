@@ -51,6 +51,31 @@ class ProjectBusyError(Exception):
         self.name = name
 
 
+def try_acquire_project_slot(name: str) -> bool:
+    """Take the slot without blocking. False when somebody else holds it.
+
+    The explicit pair exists because the HTTP endpoint has to take the slot and a
+    background task has to release it, which no context manager can span. Checking
+    `is_busy` in the request and acquiring in the task would be a check-then-act with a
+    window wide enough for two clicks to both get through.
+    """
+    return _lock_for(name).acquire(blocking=False)
+
+
+def release_project_slot(name: str) -> None:
+    """Release a slot taken by try_acquire_project_slot.
+
+    Looks the lock up rather than going through `_lock_for`: creating one here would mean
+    releasing a brand-new unlocked Lock — a RuntimeError that says nothing about the real
+    problem, which is a release without a matching acquire. Eviction cannot lose it, since
+    `_evict_idle_locked` only drops slots nobody holds.
+    """
+    with _registry_lock:
+        lock = _project_locks.get(name)
+    if lock is not None and lock.locked():
+        lock.release()
+
+
 @contextmanager
 def project_update_slot(name: str) -> Iterator[None]:
     """Take the project's slot or raise ProjectBusyError.
@@ -58,13 +83,12 @@ def project_update_slot(name: str) -> Iterator[None]:
     Non-blocking on purpose: whoever arrives second should be told (409, or a line in the
     scheduler log), not queue up to run the very same update again straight after.
     """
-    lock = _lock_for(name)
-    if not lock.acquire(blocking=False):
+    if not try_acquire_project_slot(name):
         raise ProjectBusyError(name)
     try:
         yield
     finally:
-        lock.release()
+        release_project_slot(name)
 
 
 def is_busy(name: str) -> bool:

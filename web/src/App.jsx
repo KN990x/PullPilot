@@ -45,6 +45,15 @@ const DEFAULT_PROGRESS = {
   current_project: "",
 };
 
+// Matches the endpoint's own default. The backend keeps HISTORY_RETENTION (200) rows and
+// has always accepted limit/offset; the UI just never asked for a second page.
+const HISTORY_PAGE_SIZE = 20;
+
+/** The set of in-flight project names, in the shape ProjectCard reads. */
+function mapFromNames(names) {
+  return Object.fromEntries([...names].map((name) => [name, true]));
+}
+
 // Demo mode is a development tool. It used to be live in the published build and fired on
 // ANY network error, so while PullPilot recreated its own container the user saw a panel
 // full of invented projects. Vite resolves this at build time and drops everything behind
@@ -105,7 +114,10 @@ export default function App() {
   const [selectedLog, setSelectedLog] = useState(null);
   const [isMockMode, setIsMockMode] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyAppending, setHistoryAppending] = useState(false);
   const [selectedFreq, setSelectedFreq] = useState("daily");
+  const [creatingSchedule, setCreatingSchedule] = useState(false);
   const [progress, setProgress] = useState(DEFAULT_PROGRESS);
   // Without this the dashboard rendered `projects === []` while the very first scan was
   // still running, so the "no projects detected, check your STACKS_PATH" panel flashed on
@@ -208,18 +220,42 @@ export default function App() {
     }
   }, [pushToast, requestContext]);
 
+  // Same "newest response wins" guard as loadProjects: the update-finished edge calls
+  // loadHistory(false) while the user may have just pressed Refresh, so two loads overlap
+  // and the slower, older one used to land last and win.
+  const historyRequestId = useRef(0);
+  // How many rows are already on screen, i.e. where the next page starts. A ref because
+  // "load more" reads it in the same tick it is written.
+  const historyOffsetRef = useRef(0);
+
   const loadHistory = useCallback(
-    async (allowMockFallback = true) => {
-      setHistoryLoading(true);
+    async (allowMockFallback = true, { append = false } = {}) => {
+      const requestId = ++historyRequestId.current;
+      // Appending must not raise `historyLoading`: that swaps the whole table body for a
+      // spinner, so asking for page 2 would blank the rows the user is reading.
+      const setBusy = append ? setHistoryAppending : setHistoryLoading;
+      setBusy(true);
       try {
-        const data = await fetchHistory(requestContext);
-        setHistory(data);
+        const offset = append ? historyOffsetRef.current : 0;
+        const data = await fetchHistory(requestContext, {
+          limit: HISTORY_PAGE_SIZE,
+          offset,
+        });
+        if (requestId !== historyRequestId.current) {
+          return;
+        }
+        // A short page is the end of the table: the endpoint caps `limit` at
+        // HISTORY_RETENTION, so there is no other signal that there is nothing more.
+        setHistoryHasMore(data.length === HISTORY_PAGE_SIZE);
+        historyOffsetRef.current = offset + data.length;
+        setHistory((prev) => (append ? [...prev, ...data] : data));
       } catch (error) {
-        if (isAuthRedirectError(error)) {
+        if (isAuthRedirectError(error) || requestId !== historyRequestId.current) {
           return;
         }
         if (MOCK_MODE_ALLOWED && allowMockFallback && isBackendUnreachableError(error)) {
           setHistory(MOCK_HISTORY);
+          setHistoryHasMore(false);
           return;
         }
         if (isBackendUnreachableError(error)) {
@@ -227,10 +263,17 @@ export default function App() {
           return;
         }
         console.error("Error loading history", error);
-        setHistory([]);
+        // Only the first page is cleared: wiping the table because page 3 failed would
+        // throw away what the user is already reading.
+        if (!append) {
+          setHistory([]);
+          setHistoryHasMore(false);
+        }
         pushToast("alerts.history_load_error");
       } finally {
-        setHistoryLoading(false);
+        if (requestId === historyRequestId.current) {
+          setBusy(false);
+        }
       }
     },
     [pushToast, requestContext]
@@ -259,12 +302,62 @@ export default function App() {
   // `compose ps` subprocesses) and two /history calls on every entry to the dashboard.
   const wasUpdatingRef = useRef(false);
   const accountCloseTimer = useRef(undefined);
+  // Which projects this tab asked to update and has not yet seen resolve. See the note in
+  // checkProgress for why this is a ref and not just the state above.
+  const updatingProjectsRef = useRef(new Set());
 
   useEffect(() => () => clearTimeout(accountCloseTimer.current), []);
 
   const checkProgress = useCallback(async () => {
     try {
       const data = await fetchUpdateStatus(requestContext);
+
+      // Per-project deploys run in the background too now, so the same poll reports both.
+      // Anything this tab started and that has since resolved gets its toast here.
+      //
+      // Read off the ref, not off `updatingProjects`: a state updater runs when React
+      // decides to, and under StrictMode it runs twice, so deciding "this one finished,
+      // toast it" in there would fire duplicate toasts and read stale values on the line
+      // after. The ref is the source of truth; the state exists to render from.
+      const projectStates = data.projects ?? {};
+      let someProjectRunning = false;
+      let resolvedSilently = false;
+      const settled = [];
+      for (const name of [...updatingProjectsRef.current]) {
+        const state = projectStates[name];
+        if (state === "running") {
+          someProjectRunning = true;
+          continue;
+        }
+        // Undefined counts as settled too — the entry expired, or the backend restarted —
+        // but with no toast: claiming "updated" for something we have no answer about is
+        // worse than saying nothing. The card is released either way.
+        if (state === "success" || state === "error") {
+          settled.push({ name, success: state === "success" });
+        } else {
+          resolvedSilently = true;
+        }
+        updatingProjectsRef.current.delete(name);
+      }
+      const anyResolved = settled.length > 0 || resolvedSilently;
+      if (anyResolved) {
+        setUpdatingProjects(mapFromNames(updatingProjectsRef.current));
+      }
+
+      for (const { name, success } of settled) {
+        pushToast(
+          success ? "alerts.update_ok" : "alerts.update_failed",
+          success ? "success" : "error",
+          { name }
+        );
+      }
+      if (anyResolved) {
+        await loadProjects();
+        // The history row is written by the same background task, so a per-project update
+        // refreshes it too. It used to be written and never shown until a manual refresh.
+        await loadHistory(false);
+      }
+
       if (data.is_running) {
         wasUpdatingRef.current = true;
         setProgress(data);
@@ -272,8 +365,15 @@ export default function App() {
         return;
       }
 
-      stopPolling();
       setProgress(DEFAULT_PROGRESS);
+      // Keep polling while any single-project deploy is still going: stopping on
+      // `!is_running` alone would abandon them halfway.
+      if (someProjectRunning) {
+        startPolling(checkProgress, 1000);
+        return;
+      }
+
+      stopPolling();
       // Only on the running -> finished edge: that is when the data actually changed.
       if (wasUpdatingRef.current) {
         wasUpdatingRef.current = false;
@@ -495,38 +595,51 @@ export default function App() {
 
   const handleCloseLog = useCallback(() => setSelectedLog(null), []);
 
+  /**
+   * Asks for the deploy and returns; the outcome arrives through checkProgress.
+   *
+   * It used to await the whole thing, which meant one open request for as long as the
+   * deploy took — minutes — with nothing on screen but a spinner.
+   */
   const handleUpdateProject = async (name) => {
-    setUpdatingProjects((prev) => ({ ...prev, [name]: true }));
-
     if (isMockMode) {
+      setUpdatingProjects((prev) => ({ ...prev, [name]: true }));
       await new Promise((resolve) => setTimeout(resolve, 1500));
-    } else {
-      try {
-        await updateProject(name, requestContext);
-        await loadProjects();
-        pushToast("alerts.update_ok", "success", { name });
-      } catch (error) {
-        if (error?.status === 409) {
-          pushToast("alerts.update_in_progress");
-        } else if (!isAuthRedirectError(error)) {
-          // "Error connecting to backend" was wrong here: the backend answered, the
-          // update failed. Point at the history, which holds the logs that say why.
-          pushToast(
-            isBackendUnreachableError(error)
-              ? "alerts.backend_error"
-              : "alerts.update_failed",
-            "error",
-            { name }
-          );
-        }
-      }
+      setUpdatingProjects((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+      return;
     }
 
-    setUpdatingProjects((prev) => {
-      const next = { ...prev };
-      delete next[name];
-      return next;
-    });
+    if (updatingProjectsRef.current.has(name)) {
+      return;
+    }
+    updatingProjectsRef.current.add(name);
+    setUpdatingProjects(mapFromNames(updatingProjectsRef.current));
+
+    try {
+      await updateProject(name, requestContext);
+      // 202 in hand: the deploy is running server-side and the poll owns it from here.
+      startPolling(checkProgress, 1000);
+    } catch (error) {
+      updatingProjectsRef.current.delete(name);
+      setUpdatingProjects(mapFromNames(updatingProjectsRef.current));
+      if (error?.status === 409) {
+        pushToast("alerts.update_in_progress");
+      } else if (!isAuthRedirectError(error)) {
+        // "Error connecting to backend" was wrong here: the backend answered and refused
+        // to start. A deploy that starts and then fails is reported by checkProgress.
+        pushToast(
+          isBackendUnreachableError(error)
+            ? "alerts.backend_error"
+            : "alerts.update_failed",
+          "error",
+          { name }
+        );
+      }
+    }
   };
 
   const runUpdateAll = async () => {
@@ -548,9 +661,14 @@ export default function App() {
       });
       startPolling(checkProgress, 1000);
     } catch (error) {
-      if (!isAuthRedirectError(error)) {
-        pushToast("alerts.backend_error");
+      if (isAuthRedirectError(error)) {
+        return;
       }
+      // 409 means another run already holds the global lock. Starting the polling here
+      // would draw a progress bar for a run this click never launched.
+      pushToast(
+        error?.status === 409 ? "alerts.update_all_in_progress" : "alerts.backend_error"
+      );
     }
   };
 
@@ -568,6 +686,9 @@ export default function App() {
   const handleCreateSchedule = async (event) => {
     event.preventDefault();
 
+    if (creatingSchedule) {
+      return;
+    }
     const formData = new FormData(event.target);
     const taskType = formData.get("task_type") || "cron";
     const target = formData.get("target");
@@ -611,24 +732,41 @@ export default function App() {
       };
     }
 
+    // Captured before the first await: `event.target` is nulled out once React recycles
+    // the synthetic event, and the reset below needs the form either way.
+    const form = event.target;
+    setCreatingSchedule(true);
     try {
       const created = await createSchedule(payload, requestContext);
       // The endpoint returns the created row, so appending it saves a full round trip.
       setSchedules((prev) => [...prev, created]);
-      event.target.reset();
+      form.reset();
       setSelectedFreq("daily");
       pushToast("alerts.schedule_created", "success");
     } catch (error) {
       if (isAuthRedirectError(error)) {
         return;
       }
-      // The 422 detail explains *why* the trigger was rejected — a date already gone, a
-      // weekly schedule with no day. Swallowing it left a flat "could not create".
-      pushToast(
-        error?.status === 422 ? "alerts.schedule_invalid" : "alerts.schedule_error",
-        "error",
-        { reason: error?.message ?? "" }
-      );
+      // Each rejection says something different and actionable: a date already gone, a
+      // target that no longer exists, one the user excluded, or a schedule they already
+      // have. A flat "could not create" for all four sends them guessing.
+      const byStatus = {
+        404: "alerts.schedule_rejected",
+        409: "alerts.schedule_rejected",
+        422: "alerts.schedule_invalid",
+      };
+      pushToast(byStatus[error?.status] ?? "alerts.schedule_error", "error", {
+        reason: error?.message ?? "",
+      });
+      // The target vanished or changed under the tab: reload so the picker and the
+      // warnings in the table agree with the server again.
+      if (error?.status === 404 || error?.status === 409) {
+        loadProjects();
+      }
+    } finally {
+      // In a finally: the auth-redirect branch above returns early, and leaving the flag
+      // set would disable the submit button for good.
+      setCreatingSchedule(false);
     }
   };
 
@@ -806,19 +944,25 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
-      <Header
-        t={t}
-        i18n={i18n}
-        isMockMode={isMockMode}
-        activeTab={activeTab}
-        onChangeTab={setActiveTab}
-        // Demo mode has no backend to change anything against.
-        onOpenAccount={isMockMode ? undefined : () => setAccountOpen(true)}
-        onToggleLanguage={toggleLanguage}
-        onLogout={handleLogout}
-      />
+      {/* One sticky block, not three. Header, its mobile tab bar and the progress bar are
+          siblings in this flex column, and each carried its own `sticky top-0`: they all
+          pinned to the same offset and overlapped, so on a phone the tab bar rode over the
+          header and during a global update the progress bar covered both. */}
+      <div className="sticky top-0 z-30">
+        <Header
+          t={t}
+          i18n={i18n}
+          isMockMode={isMockMode}
+          activeTab={activeTab}
+          onChangeTab={setActiveTab}
+          // Demo mode has no backend to change anything against.
+          onOpenAccount={isMockMode ? undefined : () => setAccountOpen(true)}
+          onToggleLanguage={toggleLanguage}
+          onLogout={handleLogout}
+        />
 
-      <ProgressBar t={t} progress={progress} />
+        <ProgressBar t={t} progress={progress} />
+      </div>
 
       <main className="max-w-7xl mx-auto p-4 md:p-6 w-full flex-grow">
         {activeTab === "dashboard" && (
@@ -828,6 +972,7 @@ export default function App() {
             projectsLoading={projectsLoading}
             progress={progress}
             updatingProjects={updatingProjects}
+            onRefresh={loadProjects}
             onUpdateAll={handleUpdateAll}
             onUpdateProject={handleUpdateProject}
             onToggleSetting={toggleSetting}
@@ -840,6 +985,7 @@ export default function App() {
             selectedFreq={selectedFreq}
             onSelectedFreqChange={setSelectedFreq}
             onCreateSchedule={handleCreateSchedule}
+            creating={creatingSchedule}
             projects={projects}
             schedules={schedules}
             onDeleteSchedule={handleDeleteSchedule}
@@ -852,9 +998,12 @@ export default function App() {
             t={t}
             history={history}
             historyLoading={historyLoading}
+            appending={historyAppending}
+            hasMore={historyHasMore}
             locale={uiLocale}
             // Wrapped: passed bare, React handed the click event to `allowMockFallback`.
             onRefresh={() => loadHistory()}
+            onLoadMore={() => loadHistory(false, { append: true })}
             onSelectLog={setSelectedLog}
           />
         )}

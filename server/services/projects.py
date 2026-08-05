@@ -260,12 +260,53 @@ def _wait_for_compose_healthy(
         time.sleep(2)
 
 
+def _prune_orphan_projects(db: Session, seen: set[str]) -> bool:
+    """Drop rows for stacks that are gone, but only the ones carrying no settings.
+
+    The table only ever grew, like the history and the two lock registries before it. It is
+    deliberately not a blanket delete: a row disappears from `seen` for reasons other than
+    the user removing the stack — a volume mounted at the wrong path, or a compose file
+    missing for the seconds someone is editing it — and wiping `excluded` on a stack the
+    user had fenced off would then be a silent, unrecoverable change. A row with default
+    settings has nothing to lose: the next scan recreates it identically.
+
+    Returns whether anything was deleted, so the caller commits.
+    """
+    # Nothing found at all is the shape of a bad mount far more often than of a homelab
+    # with zero stacks, and pruning is never urgent enough to risk acting on it.
+    if not seen:
+        return False
+
+    orphans = (
+        db.query(ProjectSettings)
+        .filter(
+            ProjectSettings.name.notin_(seen),
+            ProjectSettings.excluded.is_(False),
+            ProjectSettings.full_stop.is_(False),
+        )
+        .all()
+    )
+    for row in orphans:
+        db.delete(row)
+    if orphans:
+        logger.info(
+            "Escaneo: %s proyecto(s) sin carpeta y sin ajustes retirados de la BD.",
+            len(orphans),
+        )
+    return bool(orphans)
+
+
 def scan_projects_logic(db: Session) -> list[dict]:
     if not PROJECTS_ROOT.exists():
         return []
 
     pending_db_write = False
     ordered: list[tuple[str, Path, ProjectSettings]] = []
+
+    # One query instead of one per directory. The dashboard calls this on every entry, on
+    # every manual refresh and after every update, and `name` is unique and indexed, so the
+    # whole table is a cheap read whatever the stack count.
+    by_name = {row.name: row for row in db.query(ProjectSettings).all()}
 
     for path in PROJECTS_ROOT.iterdir():
         entry = path.name
@@ -280,16 +321,20 @@ def scan_projects_logic(db: Session) -> list[dict]:
             continue
         resolved = str(path.resolve())
 
-        proj = db.query(ProjectSettings).filter(ProjectSettings.name == entry).first()
+        proj = by_name.get(entry)
         if not proj:
             proj = ProjectSettings(name=entry, path=resolved)
             db.add(proj)
+            by_name[entry] = proj
             pending_db_write = True
         elif proj.path != resolved:
             proj.path = resolved
             pending_db_write = True
 
         ordered.append((entry, path, proj))
+
+    if _prune_orphan_projects(db, {entry for entry, _path, _proj in ordered}):
+        pending_db_write = True
 
     if pending_db_write:
         try:

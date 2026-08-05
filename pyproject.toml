@@ -29,6 +29,10 @@ dev = [
   # means CI installs whatever ruff shipped that morning and a release that adds a rule
   # turns an unrelated commit red — and does not reproduce in an older local venv.
   "ruff==0.16.1",
+  # AGENTS.md tells you to run `.venv/bin/pip-audit` before calling a dependency change
+  # good, but it was never installed by `make setup`: only security-audit.yml pip-installed
+  # it, on the runner. Pinned for the same reason as ruff.
+  "pip-audit==2.10.1",
 ]
 
 [tool.setuptools]

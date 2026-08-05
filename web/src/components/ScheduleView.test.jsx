@@ -128,3 +128,69 @@ describe("the active tasks table", () => {
     expect(onDeleteSchedule).toHaveBeenCalledWith(7);
   });
 });
+
+describe("excluded projects as a target", () => {
+  it("lists them but does not let one be picked", () => {
+    // The scheduler skips excluded projects, so offering one as a target would only
+    // create a task that can never run.
+    renderView({ projects: [{ name: "plex", excluded: true }, { name: "pihole" }] });
+
+    const select = screen.getByLabelText(t("schedule.target"));
+    const excluded = within(select).getByRole("option", {
+      name: t("schedule.target_excluded", { name: "plex" }),
+    });
+
+    expect(excluded).toBeDisabled();
+    expect(within(select).getByRole("option", { name: "pihole" })).not.toBeDisabled();
+  });
+});
+
+describe("tasks that can never run", () => {
+  it("flags a schedule whose project is gone", () => {
+    // The scheduler skips it with a log line nobody reads; the table listed it as active
+    // forever, as if it were still coming.
+    renderView({
+      projects: [{ name: "pihole" }],
+      schedules: [{ id: 1, target: "plex", task_type: "cron", expression: "0 4 * * *" }],
+    });
+
+    expect(screen.getByText(t("schedule.warn_missing_project"))).toBeInTheDocument();
+  });
+
+  it("flags a schedule whose project is excluded", () => {
+    renderView({
+      projects: [{ name: "plex", excluded: true }],
+      schedules: [{ id: 1, target: "plex", task_type: "cron", expression: "0 4 * * *" }],
+    });
+
+    expect(screen.getByText(t("schedule.warn_excluded_project"))).toBeInTheDocument();
+  });
+
+  it("says nothing while the project list is still empty", () => {
+    // An empty list is the first scan still running, not every stack having vanished.
+    renderView({
+      projects: [],
+      schedules: [{ id: 1, target: "plex", task_type: "cron", expression: "0 4 * * *" }],
+    });
+
+    expect(screen.queryByText(t("schedule.warn_missing_project"))).not.toBeInTheDocument();
+  });
+
+  it("never flags the global target", () => {
+    renderView({
+      projects: [{ name: "plex" }],
+      schedules: [{ id: 1, target: "GLOBAL", task_type: "cron", expression: "0 4 * * *" }],
+    });
+
+    expect(screen.queryByText(t("schedule.warn_missing_project"))).not.toBeInTheDocument();
+  });
+});
+
+describe("the create button", () => {
+  it("is disabled while the request is in flight", () => {
+    // Two clicks used to create two identical tasks; nothing downstream deduplicates.
+    renderView({ creating: true });
+
+    expect(screen.getByRole("button", { name: t("schedule.creating") })).toBeDisabled();
+  });
+});

@@ -12,6 +12,7 @@ from server.app import app
 from server.database import session_scope
 from server.models.db import AuthCredential, ProjectSettings, ScheduledTask, UpdateLog
 from server.services import auth as auth_service
+from server.services import locks, update_state
 
 SETUP_USERNAME = "admin"
 SETUP_PASSWORD = "supersecreta"
@@ -43,6 +44,11 @@ def _clean_database_state():
     _truncate()
     auth_state.reset_for_tests()
     login_rate_limit.reset_for_tests()
+    # Both are process-global and now outlive a request: the per-project update runs as a
+    # BackgroundTask, so a test that leaves a slot taken or a `running` entry behind is the
+    # next test's starting state.
+    locks.reset_for_tests()
+    update_state.reset_for_tests()
 
 
 class _NoSleep:
