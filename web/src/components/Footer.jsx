@@ -1,4 +1,5 @@
 export const KOFI_URL = "https://ko-fi.com/kn990x";
+export const SITE_URL = "https://kn990x.dev";
 
 /**
  * Ko-fi cup mark (white cup, red heart) so the CTA reads as Ko-fi rather than a generic
@@ -30,7 +31,7 @@ export default function Footer({ t }) {
         <p className="text-[13px] font-medium text-slate-600">
           &copy; {new Date().getFullYear()}{" "}
           <a
-            href="https://github.com/KN990x"
+            href={SITE_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:underline"
