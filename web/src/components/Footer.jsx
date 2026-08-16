@@ -1,17 +1,29 @@
-import { useCallback, useState } from "react";
-import { Coffee } from "lucide-react";
-
-import SupportModal from "./SupportModal";
+export const KOFI_URL = "https://ko-fi.com/kn990x";
 
 /**
- * Support CTA uses the same blue pill family as the header actions. Opens the official
- * Ko-fi embed in a modal instead of navigating away.
+ * Ko-fi cup mark (white cup, red heart) so the CTA reads as Ko-fi rather than a generic
+ * coffee / Buy Me a Coffee pill.
  */
-export default function Footer({ t }) {
-  const [supportOpen, setSupportOpen] = useState(false);
-  // Stable for useFocusTrap: an inline arrow would re-run the trap effect every render.
-  const closeSupport = useCallback(() => setSupportOpen(false), []);
+function KofiCupMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" className="shrink-0">
+      <path
+        fill="#FF5E5B"
+        d="M12 2.1c-.42 0-.8.22-1.02.56-.22-.34-.6-.56-1.02-.56-.84 0-1.46.78-1.32 1.62.14.92 1.08 1.5 2.08 2.1L12 6.7l1.28-.88c1-.6 1.94-1.18 2.08-2.1.14-.84-.48-1.62-1.32-1.62-.42 0-.8.22-1.02.56C12.8 2.32 12.42 2.1 12 2.1Z"
+      />
+      <path
+        fill="currentColor"
+        d="M5.4 9.1c0-.6.5-1.1 1.1-1.1h9.2c.6 0 1.1.5 1.1 1.1v6.2A4.2 4.2 0 0 1 12.6 19.6H9.7A4.2 4.2 0 0 1 5.4 15.3V9.1Z"
+      />
+      <path
+        fill="currentColor"
+        d="M16.8 10.35h.85a2.5 2.5 0 1 1 0 5h-.5v-1.35h.5a1.15 1.15 0 1 0 0-2.3h-.85v-1.35Z"
+      />
+    </svg>
+  );
+}
 
+export default function Footer({ t }) {
   return (
     <footer className="bg-white border-t border-slate-200 mt-auto">
       <div className="max-w-7xl mx-auto px-6 py-[22px] flex flex-wrap justify-between items-center gap-[14px]">
@@ -27,17 +39,16 @@ export default function Footer({ t }) {
           </a>
         </p>
 
-        <button
-          type="button"
-          onClick={() => setSupportOpen(true)}
-          className="inline-flex items-center gap-[7px] px-[15px] py-2 rounded-[10px] border border-blue-600/30 bg-blue-600/[0.08] text-blue-600 text-[13px] font-semibold transition-colors hover:bg-blue-600 hover:border-blue-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        <a
+          href={KOFI_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 h-9 px-4 rounded-[7px] bg-[#13C3FF] text-white text-[13px] font-bold shadow-[1px_1px_0_rgba(0,0,0,0.18)] transition-[filter,transform] hover:brightness-[1.06] hover:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#13C3FF]"
         >
-          <Coffee size={15} aria-hidden="true" />
+          <KofiCupMark />
           {t("footer.tip_me")}
-        </button>
+        </a>
       </div>
-
-      <SupportModal t={t} open={supportOpen} onClose={closeSupport} />
     </footer>
   );
 }

@@ -222,10 +222,7 @@ const resources = {
         sun: "Domingo",
       },
       footer: {
-        tip_me: "Invítame un café",
-        support_title: "Apoyar el proyecto",
-        support_close: "Cerrar",
-        support_iframe_title: "Ko-fi de kn990x",
+        tip_me: "Apóyame en Ko-fi",
       },
       pwa: {
         update_available: "Hay una nueva versión disponible. ¿Recargar?",
@@ -448,9 +445,6 @@ const resources = {
       },
       footer: {
         tip_me: "Support me on Ko-fi",
-        support_title: "Support the project",
-        support_close: "Close",
-        support_iframe_title: "kn990x on Ko-fi",
       },
       pwa: {
         update_available: "New version available. Reload?",
