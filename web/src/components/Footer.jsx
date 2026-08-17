@@ -26,8 +26,8 @@ function KofiCupMark() {
 
 export default function Footer({ t }) {
   return (
-    <footer className="bg-white border-t border-slate-200 mt-auto">
-      <div className="max-w-7xl mx-auto px-6 py-[22px] flex flex-wrap justify-between items-center gap-[14px]">
+    <footer className="bg-white border-t border-slate-200 mt-auto pb-[env(safe-area-inset-bottom)]">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 py-[22px] flex flex-wrap justify-between items-center gap-[14px]">
         <p className="text-[13px] font-medium text-slate-600">
           &copy; {new Date().getFullYear()}{" "}
           <a

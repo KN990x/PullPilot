@@ -13,9 +13,22 @@ export default function AuthLayout({
   children,
 }) {
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
+    <div className="min-h-dvh bg-slate-50 flex flex-col items-center justify-center p-4 overflow-y-auto">
       <div className="w-full max-w-sm animate-in fade-in slide-in-from-bottom-4 duration-300">
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        <div className="relative bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="absolute top-3 right-3">
+            <HeaderButton
+              variant="lang"
+              icon={Languages}
+              label={t("app.change_language")}
+              onClick={onToggleLanguage}
+            >
+              <span className="text-xs font-bold">
+                {normalizeUiLocale(i18n.language).toUpperCase()}
+              </span>
+            </HeaderButton>
+          </div>
+
           <div className="flex flex-col items-center gap-2 mb-6">
             <img
               src="/assets/logo.png"
@@ -38,19 +51,6 @@ export default function AuthLayout({
           ) : (
             children
           )}
-        </div>
-
-        <div className="flex justify-center mt-4">
-          <HeaderButton
-            variant="lang"
-            icon={Languages}
-            label={t("app.change_language")}
-            onClick={onToggleLanguage}
-          >
-            <span className="text-xs font-bold">
-              {normalizeUiLocale(i18n.language).toUpperCase()}
-            </span>
-          </HeaderButton>
         </div>
       </div>
     </div>

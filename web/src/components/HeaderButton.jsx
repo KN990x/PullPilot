@@ -9,8 +9,9 @@
  */
 
 // Compact padding is what the demo uses below 900px; from `sm` up, 9px 14px.
+// min-h-11 keeps the tap target at ~44px on a phone without growing the pill on desktop.
 const BASE =
-  "inline-flex items-center gap-[7px] px-2.5 py-2 sm:px-3.5 sm:py-[9px] rounded-[10px] border text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600";
+  "inline-flex items-center justify-center gap-[7px] min-h-11 px-2.5 py-2 sm:min-h-0 sm:px-3.5 sm:py-[9px] rounded-[10px] border text-[13px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600";
 
 const VARIANTS = {
   account:

@@ -26,7 +26,7 @@ export default function Toaster({ t, toasts, onDismiss }) {
       role="status"
       aria-live="polite"
       aria-atomic="false"
-      className="fixed z-50 bottom-4 left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-sm flex flex-col gap-2 pointer-events-none"
+      className="fixed z-50 bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 w-[calc(100%-2rem)] max-w-sm flex flex-col gap-2 pointer-events-none"
     >
       {toasts.map((toast) => {
         const tone = TONES[toast.tone] ?? TONES.error;

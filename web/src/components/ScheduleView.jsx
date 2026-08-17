@@ -17,7 +17,7 @@ const CONTROL_CLASS =
 function SelectChevron() {
   return (
     <ChevronRight
-      className="absolute right-3 top-3 text-slate-400 rotate-90 pointer-events-none"
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 rotate-90 pointer-events-none"
       size={16}
       aria-hidden="true"
     />
@@ -57,7 +57,7 @@ export default function ScheduleView({
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+      <div className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 shadow-sm">
         <h2 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2 pb-4 border-b border-slate-100">
           <Clock size={20} className="text-blue-600" aria-hidden="true" />{" "}
           {t("schedule.new_schedule")}
@@ -180,8 +180,6 @@ export default function ScheduleView({
             </div>
           )}
 
-          {taskType === "cron" && selectedFreq === "daily" && <div className="hidden lg:block" />}
-
           {taskType === "cron" && (
             <fieldset className="flex flex-col gap-2 border-0 p-0 m-0">
               <legend className={`${LABEL_CLASS} p-0 mb-2`}>{t("schedule.time")}</legend>
@@ -225,7 +223,7 @@ export default function ScheduleView({
           )}
 
           {taskType === "date" && (
-            <div className="flex flex-col gap-2 lg:col-span-2">
+            <div className="flex flex-col gap-2 md:col-span-2 lg:col-span-2">
               <label htmlFor="schedule-date-iso" className={LABEL_CLASS}>
                 {t("schedule.datetime_once")}
               </label>
@@ -241,11 +239,13 @@ export default function ScheduleView({
           )}
 
           {/* Disabled while the request is in flight: two clicks used to create two
-              identical tasks, and nothing downstream deduplicates them. */}
+              identical tasks, and nothing downstream deduplicates them.
+              col-span-full: without it the button sat in one grid cell (half-width on
+              md, quarter on lg) and looked off-centre next to the time hint. */}
           <button
             type="submit"
             disabled={creating}
-            className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-60 disabled:active:scale-100 disabled:cursor-not-allowed text-white p-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md h-[46px]"
+            className="col-span-full w-full bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-60 disabled:active:scale-100 disabled:cursor-not-allowed text-white p-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md h-[46px]"
           >
             {creating ? (
               <>
@@ -274,11 +274,12 @@ export default function ScheduleView({
             <p className="italic">{t("schedule.no_tasks")}</p>
           </div>
         ) : (
-          // Its own scroll container: the card is overflow-hidden, so on a phone a long
-          // project name plus "Weekly (Wednesday) at 04:30" was clipped, not scrollable.
-          <div className="overflow-x-auto">
+          // Stacked rows below md so a long project name plus "Weekly (Wednesday) at
+          // 04:30" no longer forces horizontal scroll on a phone. One DOM for both
+          // layouts: thead stays for screen readers (sr-only on small screens).
+          <div className="md:overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-700 uppercase font-bold text-xs">
+              <thead className="sr-only md:not-sr-only md:table-header-group bg-slate-50 text-slate-700 uppercase font-bold text-xs">
                 <tr>
                   <th scope="col" className="p-4">
                     {t("schedule.table_target")}
@@ -291,20 +292,26 @@ export default function ScheduleView({
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 block md:table-row-group">
                 {schedules.map((schedule) => {
                   const blocked = blockedReason(schedule.target);
                   return (
-                  <tr key={schedule.id} className="hover:bg-slate-50 group transition-colors">
-                    <td className="p-4 font-bold text-slate-800">
+                  <tr
+                    key={schedule.id}
+                    className="block md:table-row p-4 md:p-0 hover:bg-slate-50 group transition-colors border-b border-slate-100 md:border-0 space-y-3 md:space-y-0"
+                  >
+                    <td className="block md:table-cell md:p-4 font-bold text-slate-800">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block">
+                        {t("schedule.table_target")}
+                      </span>
                       {schedule.target === "GLOBAL" ? (
-                        <span className="text-blue-600 flex items-center gap-2 whitespace-nowrap">
+                        <span className="text-blue-600 flex items-center gap-2">
                           <Shield size={16} aria-hidden="true" />{" "}
                           {t("schedule.target_global")}
                         </span>
                       ) : (
                         <span className="flex flex-col gap-1">
-                          <span>{schedule.target}</span>
+                          <span className="break-all">{schedule.target}</span>
                           {blocked && (
                             <span className="inline-flex items-start gap-1 text-xs font-normal text-amber-700">
                               <AlertTriangle
@@ -318,10 +325,16 @@ export default function ScheduleView({
                         </span>
                       )}
                     </td>
-                    <td className="p-4 font-mono text-slate-600 text-xs md:text-sm">
-                      {formatExpression(schedule.expression, schedule.task_type)}
+                    <td className="block md:table-cell md:p-4 font-mono text-slate-600 text-xs md:text-sm">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block font-sans">
+                        {t("schedule.table_when")}
+                      </span>
+                      <span className="break-words">{formatExpression(schedule.expression, schedule.task_type)}</span>
                     </td>
-                    <td className="p-4 text-right">
+                    <td className="block md:table-cell md:p-4 md:text-right">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block">
+                        {t("schedule.table_actions")}
+                      </span>
                       <button
                         type="button"
                         onClick={() => onDeleteSchedule(schedule.id)}
@@ -329,7 +342,7 @@ export default function ScheduleView({
                           target: schedule.target,
                         })}
                         title={t("schedule.delete_task")}
-                        className="text-slate-500 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                        className="text-slate-500 hover:text-red-600 p-2 min-h-11 min-w-11 inline-flex items-center justify-center hover:bg-red-50 rounded-lg transition-colors"
                       >
                         <Trash2 size={16} aria-hidden="true" />
                       </button>

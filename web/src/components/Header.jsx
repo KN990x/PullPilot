@@ -17,22 +17,26 @@ export default function Header({
     <>
       {/* Not sticky itself: App wraps this and the progress bar in one sticky block, so
           the three used to pin to the same offset and cover each other. */}
-      <header className="bg-white border-b border-slate-200 px-4 py-3 md:px-6 md:py-4 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
+      <header className="bg-white border-b border-slate-200 px-4 py-3 md:px-6 md:py-4 flex items-center justify-between gap-2 shadow-sm pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex items-center gap-3 min-w-0">
           <img
             src="/assets/logo.png"
             alt=""
             aria-hidden="true"
-            className="w-8 h-8 md:w-10 md:h-10 object-contain"
+            className="w-8 h-8 md:w-10 md:h-10 object-contain shrink-0"
           />
 
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">{t("app.title")}</h1>
-            <p className="text-xs text-slate-500 font-medium hidden md:block">{t("app.subtitle")}</p>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight truncate">
+              {t("app.title")}
+            </h1>
+            <p className="text-xs text-slate-500 font-medium hidden md:block">
+              {t("app.subtitle")}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 md:gap-4">
+        <div className="flex items-center gap-2 md:gap-4 shrink-0">
           {isMockMode && (
             /* Visible on a phone too: hidden behind lg: the badge defeated its own
                purpose, leaving no sign that the projects on screen were invented. */
@@ -111,7 +115,7 @@ export default function Header({
               type="button"
               aria-current={activeTab === tab ? "page" : undefined}
               onClick={() => onChangeTab(tab)}
-              className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all ${
+              className={`flex-1 min-h-11 min-w-0 px-2 py-1.5 rounded-md text-xs font-medium transition-all truncate ${
                 activeTab === tab
                   ? "bg-white text-blue-600 shadow-sm"
                   : "text-slate-600 hover:text-slate-800"

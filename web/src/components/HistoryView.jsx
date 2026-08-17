@@ -13,15 +13,17 @@ export default function HistoryView({
 }) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300">
-      <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-        <h2 className="text-lg font-bold text-slate-800">{t("history.title")}</h2>
+      <div className="p-4 md:p-6 border-b border-slate-200 flex justify-between items-center gap-2">
+        <h2 className="text-lg font-bold text-slate-800 min-w-0 truncate">
+          {t("history.title")}
+        </h2>
         <button
           type="button"
           onClick={onRefresh}
           disabled={historyLoading}
           aria-label={t("history.refresh")}
           title={t("history.refresh")}
-          className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 disabled:hover:text-slate-500 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+          className="shrink-0 p-2 min-h-11 min-w-11 inline-flex items-center justify-center text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors disabled:opacity-50 disabled:hover:text-slate-500 disabled:hover:bg-transparent disabled:cursor-not-allowed"
         >
           <RefreshCw
             size={18}
@@ -30,9 +32,11 @@ export default function HistoryView({
           />
         </button>
       </div>
-      <div className="overflow-x-auto">
+      {/* Stacked rows below md: four columns with whitespace-nowrap forced a sideways
+          scroll on a phone. One DOM keeps columnheader queries working in tests. */}
+      <div className="md:overflow-x-auto">
         <table className="w-full text-left text-sm text-slate-600">
-          <thead className="bg-slate-50 text-slate-700 uppercase font-bold text-xs">
+          <thead className="sr-only md:not-sr-only md:table-header-group bg-slate-50 text-slate-700 uppercase font-bold text-xs">
             <tr>
               <th scope="col" className="px-6 py-4">
                 {t("history.table_status")}
@@ -48,10 +52,10 @@ export default function HistoryView({
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-100 block md:table-row-group">
             {historyLoading ? (
-              <tr>
-                <td colSpan={4} className="px-6 py-12 text-center text-slate-500">
+              <tr className="block md:table-row">
+                <td colSpan={4} className="block md:table-cell px-4 md:px-6 py-12 text-center text-slate-500">
                   {/* Its own status message: this used to reuse the button's label,
                       "Refresh history", which reads as a command, not a state. */}
                   <span role="status" className="inline-flex items-center gap-2">
@@ -63,8 +67,14 @@ export default function HistoryView({
             ) : (
               <>
                 {history.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4">
+                  <tr
+                    key={log.id}
+                    className="block md:table-row p-4 md:p-0 hover:bg-slate-50 transition-colors border-b border-slate-100 md:border-0 space-y-3 md:space-y-0"
+                  >
+                    <td className="block md:table-cell md:px-6 md:py-4">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block">
+                        {t("history.table_status")}
+                      </span>
                       {log.status === "SUCCESS" ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200">
                           <CheckCircle size={14} aria-hidden="true" />{" "}
@@ -77,25 +87,36 @@ export default function HistoryView({
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 font-mono text-slate-500 whitespace-nowrap">
-                      {new Date(log.timestamp).toLocaleString(locale)}
+                    <td className="block md:table-cell md:px-6 md:py-4 font-mono text-slate-500">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block font-sans">
+                        {t("history.table_date")}
+                      </span>
+                      <span className="md:whitespace-nowrap">
+                        {new Date(log.timestamp).toLocaleString(locale)}
+                      </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="block md:table-cell md:px-6 md:py-4">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block">
+                        {t("history.table_summary")}
+                      </span>
                       {/* The truncation lives on a block inside the cell: `max-width` on
                           a <td> in an auto-layout table is ignored, so a long summary
                           used to blow the row out instead of being clipped. */}
                       <span
-                        className="block max-w-md truncate"
+                        className="block max-w-full md:max-w-md break-words md:truncate"
                         title={log.summary}
                       >
                         {log.summary}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="block md:table-cell md:px-6 md:py-4">
+                      <span className="md:hidden text-xs font-bold uppercase tracking-wide text-slate-500 mb-1 block">
+                        {t("history.table_actions")}
+                      </span>
                       <button
                         type="button"
                         onClick={() => onSelectLog(log)}
-                        className="text-blue-600 hover:text-blue-800 font-medium hover:underline whitespace-nowrap"
+                        className="text-blue-600 hover:text-blue-800 font-medium hover:underline min-h-11 inline-flex items-center"
                       >
                         {t("history.view_details")}
                       </button>
@@ -103,8 +124,11 @@ export default function HistoryView({
                   </tr>
                 ))}
                 {history.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-slate-500 italic">
+                  <tr className="block md:table-row">
+                    <td
+                      colSpan={4}
+                      className="block md:table-cell px-4 md:px-6 py-12 text-center text-slate-500 italic"
+                    >
                       {t("history.no_logs")}
                     </td>
                   </tr>
@@ -117,8 +141,8 @@ export default function HistoryView({
       {history.length > 0 && (
         // The server keeps HISTORY_RETENTION rows and has always accepted limit/offset;
         // without this the newest 20 were the only ones anybody could reach.
-        <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-4">
-          <p className="text-xs text-slate-500">
+        <div className="px-4 md:px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-4">
+          <p className="text-xs text-slate-500 min-w-0">
             {t("history.showing_latest", { count: history.length })}
           </p>
           {hasMore && (
@@ -126,7 +150,7 @@ export default function HistoryView({
               type="button"
               onClick={onLoadMore}
               disabled={appending}
-              className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed whitespace-nowrap"
+              className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed min-h-11 inline-flex items-center"
             >
               {appending ? t("history.loading") : t("history.load_more")}
             </button>

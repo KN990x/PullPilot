@@ -50,7 +50,7 @@ export default function Dashboard({
 
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-blue-50 p-6 rounded-xl border border-blue-100 gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-blue-50 p-4 md:p-6 rounded-xl border border-blue-100 gap-4">
         <div>
           <h2 className="text-lg font-semibold text-blue-900">{t("status.system_status")}</h2>
           <p className="text-blue-700 text-sm mt-1">

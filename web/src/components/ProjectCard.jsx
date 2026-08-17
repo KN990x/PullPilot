@@ -86,11 +86,12 @@ export default function ProjectCard({
         </div>
 
         <div className="pt-4 border-t border-slate-100 space-y-3">
-          <label className="flex items-center justify-between cursor-pointer group">
-            <span className="text-sm text-slate-600 group-hover:text-slate-900 flex items-center gap-2">
-              <Power size={16} aria-hidden="true" /> {t("card.full_stop")}
+          <label className="flex items-center justify-between gap-3 cursor-pointer group">
+            <span className="text-sm text-slate-600 group-hover:text-slate-900 flex items-center gap-2 min-w-0">
+              <Power size={16} className="shrink-0" aria-hidden="true" />{" "}
+              <span className="min-w-0">{t("card.full_stop")}</span>
             </span>
-            <div className="relative inline-flex items-center cursor-pointer">
+            <div className="relative inline-flex items-center cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 className="sr-only peer"
@@ -102,11 +103,12 @@ export default function ProjectCard({
             </div>
           </label>
 
-          <label className="flex items-center justify-between cursor-pointer group">
-            <span className="text-sm text-slate-600 group-hover:text-slate-900 flex items-center gap-2">
-              <AlertTriangle size={16} aria-hidden="true" /> {t("card.exclude")}
+          <label className="flex items-center justify-between gap-3 cursor-pointer group">
+            <span className="text-sm text-slate-600 group-hover:text-slate-900 flex items-center gap-2 min-w-0">
+              <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />{" "}
+              <span className="min-w-0">{t("card.exclude")}</span>
             </span>
-            <div className="relative inline-flex items-center cursor-pointer">
+            <div className="relative inline-flex items-center cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 className="sr-only peer"

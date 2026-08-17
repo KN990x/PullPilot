@@ -31,7 +31,7 @@ export default function AccountModal({
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
       role="presentation"
       onClick={(event) => {
         // Only a click on the backdrop itself, so no stopPropagation handler is needed on
@@ -46,10 +46,13 @@ export default function AccountModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="account-modal-title"
-        className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
+        className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
       >
-        <div className="p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <h3 id="account-modal-title" className="font-bold text-lg text-slate-800">
+        <div className="p-5 border-b border-slate-200 flex justify-between items-center gap-3 bg-slate-50">
+          <h3
+            id="account-modal-title"
+            className="font-bold text-lg text-slate-800 min-w-0 truncate"
+          >
             {t("account.title")}
           </h3>
           <button
@@ -57,7 +60,7 @@ export default function AccountModal({
             type="button"
             onClick={onClose}
             aria-label={t("account.close")}
-            className="text-slate-500 hover:text-slate-700 transition-colors"
+            className="shrink-0 min-h-11 min-w-11 inline-flex items-center justify-center text-slate-500 hover:text-slate-700 transition-colors"
           >
             <X size={24} aria-hidden="true" />
           </button>
@@ -150,18 +153,18 @@ export default function AccountModal({
             />
           </div>
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-col-reverse sm:flex-row gap-2 pt-1">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors h-[46px]"
+              className="flex-1 min-h-11 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg font-medium transition-colors"
             >
               {t("account.cancel")}
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-60 disabled:active:scale-100 text-white p-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md h-[46px]"
+              className="flex-1 min-h-11 bg-blue-600 hover:bg-blue-700 active:scale-95 disabled:opacity-60 disabled:active:scale-100 text-white p-3 rounded-lg font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md"
             >
               {submitting ? (
                 <>

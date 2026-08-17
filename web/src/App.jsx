@@ -943,7 +943,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col">
+    <div className="min-h-dvh bg-slate-50 text-slate-900 font-sans flex flex-col">
       {/* One sticky block, not three. Header, its mobile tab bar and the progress bar are
           siblings in this flex column, and each carried its own `sticky top-0`: they all
           pinned to the same offset and overlapped, so on a phone the tab bar rode over the
