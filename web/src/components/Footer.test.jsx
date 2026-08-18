@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import i18n from "../i18n";
-import Footer, { KOFI_URL, SITE_URL } from "./Footer";
+import Footer, { SITE_URL } from "./Footer";
 
 describe("Footer", () => {
   beforeEach(async () => {
@@ -21,13 +21,14 @@ describe("Footer", () => {
     expect(link.parentElement).toHaveTextContent(`© ${year} KN990x`);
   });
 
-  it("points to the Ko-fi page in a new tab", () => {
+  it("opens the support dialog in place instead of linking out", () => {
+    // The whole point of the change: no href, so nothing navigates away from the app.
     const t = i18n.getFixedT("es");
-    render(<Footer t={t} />);
+    const { container } = render(<Footer t={t} />);
 
-    const link = screen.getByRole("link", { name: t("footer.tip_me") });
-    expect(link).toHaveAttribute("href", KOFI_URL);
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", expect.stringMatching(/noopener/));
+    const button = screen.getByRole("button", { name: t("footer.support") });
+    expect(button).toHaveAttribute("type", "button");
+    expect(button).not.toHaveAttribute("href");
+    expect(container.querySelector("iframe")).toBeNull();
   });
 });

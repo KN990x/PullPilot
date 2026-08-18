@@ -222,7 +222,12 @@ const resources = {
         sun: "Domingo",
       },
       footer: {
-        tip_me: "Apóyame en Ko-fi",
+        support: "Invítame a un café",
+        support_loading: "Cargando el formulario de Ko-fi...",
+        support_blocked_title: "No se ha podido cargar el formulario",
+        support_blocked_hint: "Puede que un bloqueador de anuncios lo esté frenando, o que este equipo no tenga salida a internet.",
+        support_open: "Abrir en Ko-fi",
+        support_fallback: "¿No carga? Abrir en Ko-fi",
       },
       pwa: {
         update_available: "Hay una nueva versión disponible. ¿Recargar?",
@@ -444,7 +449,12 @@ const resources = {
         sun: "Sunday",
       },
       footer: {
-        tip_me: "Support me on Ko-fi",
+        support: "Buy me a coffee",
+        support_loading: "Loading the Ko-fi form...",
+        support_blocked_title: "The form could not be loaded",
+        support_blocked_hint: "An ad blocker may be stopping it, or this machine may have no route to the internet.",
+        support_open: "Open on Ko-fi",
+        support_fallback: "Not loading? Open on Ko-fi",
       },
       pwa: {
         update_available: "New version available. Reload?",
