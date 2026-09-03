@@ -6,6 +6,7 @@ import {
   PASSWORD_MIN_LEN,
   USERNAME_MAX_LEN,
   USERNAME_MIN_LEN,
+  USERNAME_PATTERN,
 } from "../lib/authPolicy";
 
 
@@ -60,6 +61,8 @@ export default function SetupView({
             required
             minLength={USERNAME_MIN_LEN}
             maxLength={USERNAME_MAX_LEN}
+            pattern={USERNAME_PATTERN}
+            title={t("setup.username_hint")}
             className={INPUT_CLASS}
           />
           <span className={HINT_CLASS}>{t("setup.username_hint")}</span>

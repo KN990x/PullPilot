@@ -595,6 +595,10 @@ export default function App() {
 
   const handleCloseLog = useCallback(() => setSelectedLog(null), []);
 
+  // Same reason as the two above: an inline cancel re-ran the focus trap on every
+  // progress tick, which jumped focus back to Cancelar and recaptured the restore target.
+  const handleCloseConfirm = useCallback(() => setConfirmState(null), []);
+
   /**
    * Asks for the deploy and returns; the outcome arrives through checkProgress.
    *
@@ -1035,7 +1039,7 @@ export default function App() {
           message={confirmState ? t(confirmState.messageKey, confirmState.options) : ""}
           details={confirmState?.details}
           confirmLabel={confirmState ? t(confirmState.confirmKey) : ""}
-          onCancel={() => setConfirmState(null)}
+          onCancel={handleCloseConfirm}
           onConfirm={() => {
             const action = confirmState?.onConfirm;
             setConfirmState(null);

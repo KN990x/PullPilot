@@ -110,10 +110,16 @@ def test_schedules_list_shape(client: TestClient) -> None:
     assert required.issubset(set(row.keys()))
 
 
-def test_get_projects(client: TestClient) -> None:
+def test_get_projects(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    root = tmp_path / "projects_root"
+    root.mkdir()
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+
     response = client.get("/api/projects")
     assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    assert response.json() == []
 
 
 def test_delete_schedule_not_found(client: TestClient) -> None:

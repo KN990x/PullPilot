@@ -1,11 +1,13 @@
 import { CheckCircle2, Loader2, Save, X } from "lucide-react";
 
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import {
   PASSWORD_MAX_LEN,
   PASSWORD_MIN_LEN,
   USERNAME_MAX_LEN,
   USERNAME_MIN_LEN,
+  USERNAME_PATTERN,
 } from "../lib/authPolicy";
 
 
@@ -24,6 +26,7 @@ export default function AccountModal({
   success,
 }) {
   const { dialogRef, initialFocusRef } = useFocusTrap({ open, onClose });
+  useBodyScrollLock(open);
 
   if (!open) {
     return null;
@@ -103,6 +106,7 @@ export default function AccountModal({
               type="password"
               autoComplete="current-password"
               required
+              maxLength={PASSWORD_MAX_LEN}
               className={INPUT_CLASS}
             />
           </div>
@@ -119,6 +123,8 @@ export default function AccountModal({
               defaultValue={username ?? ""}
               minLength={USERNAME_MIN_LEN}
               maxLength={USERNAME_MAX_LEN}
+              pattern={USERNAME_PATTERN}
+              title={t("setup.username_hint")}
               className={INPUT_CLASS}
             />
           </div>

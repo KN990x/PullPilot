@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 
 /**
@@ -20,6 +21,7 @@ export default function ConfirmDialog({
   onCancel,
 }) {
   const { dialogRef, initialFocusRef } = useFocusTrap({ open, onClose: onCancel });
+  useBodyScrollLock(open);
 
   if (!open) {
     return null;
@@ -42,7 +44,9 @@ export default function ConfirmDialog({
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
-        aria-describedby="confirm-dialog-message"
+        aria-describedby={
+          details ? "confirm-dialog-message confirm-dialog-details" : "confirm-dialog-message"
+        }
         className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[min(90dvh,90vh)] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
       >
         <div className="p-6 flex gap-4 overflow-y-auto min-w-0">
@@ -59,7 +63,10 @@ export default function ConfirmDialog({
               {message}
             </p>
             {details && (
-              <p className="text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 break-all">
+              <p
+                id="confirm-dialog-details"
+                className="text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-700 break-all"
+              >
                 {details}
               </p>
             )}

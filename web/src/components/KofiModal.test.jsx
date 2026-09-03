@@ -167,6 +167,44 @@ describe("KofiModal", () => {
     expect(screen.getByText(t("footer.support_blocked_title"))).toBeInTheDocument();
   });
 
+  it("does not give up on Ko-fi because the dialog was closed while it loaded", () => {
+    const { button, t } = renderFooter();
+    fireEvent.click(button);
+    fireEvent.keyDown(document, { key: "Escape" });
+    finishExitAnimation();
+
+    giveUpWaitingForKofi();
+
+    fireEvent.click(button);
+    expect(screen.queryByText(t("footer.support_blocked_title"))).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(t("footer.support_loading"));
+  });
+
+  it("can finish loading while the dialog is closed", () => {
+    const { container, button, t } = renderFooter();
+    fireEvent.click(button);
+    const iframe = container.querySelector("iframe");
+    fireEvent.keyDown(document, { key: "Escape" });
+    finishExitAnimation();
+
+    fireCrossOriginLoad(iframe);
+
+    fireEvent.click(button);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText(t("footer.support_blocked_title"))).not.toBeInTheDocument();
+  });
+
+  it("keeps the loading iframe out of the tab order until the widget arrives", () => {
+    const { container, button } = renderFooter();
+    fireEvent.click(button);
+
+    const iframe = container.querySelector("iframe");
+    expect(iframe).toHaveAttribute("tabindex", "-1");
+
+    fireCrossOriginLoad(iframe);
+    expect(iframe).not.toHaveAttribute("tabindex");
+  });
+
   it("asks Ko-fi again when the user retries", () => {
     const { container, button, t } = renderFooter();
     fireEvent.click(button);

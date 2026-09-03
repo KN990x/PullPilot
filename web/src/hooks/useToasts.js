@@ -2,6 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const DEFAULT_TTL_MS = 6000;
 
+function sameToast(toast, messageKey, options) {
+  return (
+    toast.messageKey === messageKey &&
+    JSON.stringify(toast.options) === JSON.stringify(options)
+  );
+}
+
 /**
  * Non-blocking notifications, replacing the native `alert()` this app used everywhere.
  *
@@ -34,7 +41,19 @@ export function useToasts() {
       const id = nextId.current++;
       setToasts((prev) => {
         // The same message twice in a row is one event to the reader, not two.
-        const withoutDuplicate = prev.filter((toast) => toast.messageKey !== messageKey);
+        // Options are part of the identity: two `alerts.update_ok` for different stacks
+        // are two events, and collapsing them on the key alone hid every name but the last.
+        const withoutDuplicate = prev.filter((toast) => {
+          if (!sameToast(toast, messageKey, options)) {
+            return true;
+          }
+          const timer = timers.current.get(toast.id);
+          if (timer) {
+            clearTimeout(timer);
+            timers.current.delete(toast.id);
+          }
+          return false;
+        });
         return [...withoutDuplicate, { id, messageKey, tone, options }];
       });
       timers.current.set(

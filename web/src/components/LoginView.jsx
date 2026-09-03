@@ -1,6 +1,7 @@
 import { Loader2, LogIn } from "lucide-react";
 
 import AuthLayout from "./AuthLayout";
+import { PASSWORD_MAX_LEN, USERNAME_MAX_LEN } from "../lib/authPolicy";
 
 const INPUT_CLASS =
   "w-full appearance-none bg-slate-50 border border-slate-200 rounded-lg p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 transition-all text-slate-700";
@@ -44,6 +45,7 @@ export default function LoginView({
             // eslint-disable-next-line jsx-a11y/no-autofocus -- single-purpose full-screen form, this field is the only thing on it
             autoFocus
             required
+            maxLength={USERNAME_MAX_LEN}
             className={INPUT_CLASS}
           />
         </div>
@@ -58,6 +60,7 @@ export default function LoginView({
             type="password"
             autoComplete="current-password"
             required
+            maxLength={PASSWORD_MAX_LEN}
             className={INPUT_CLASS}
           />
         </div>

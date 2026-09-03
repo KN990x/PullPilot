@@ -1,5 +1,6 @@
 import { Copy, X } from "lucide-react";
 
+import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 
 function safeStringifyDetails(details) {
@@ -15,6 +16,7 @@ export default function LogModal({ t, selectedLog, onClose, onCopied }) {
     open: Boolean(selectedLog),
     onClose,
   });
+  useBodyScrollLock(Boolean(selectedLog));
 
   if (!selectedLog) {
     return null;

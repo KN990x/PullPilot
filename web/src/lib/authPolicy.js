@@ -7,5 +7,6 @@
  */
 export const USERNAME_MIN_LEN = 3;
 export const USERNAME_MAX_LEN = 64;
+export const USERNAME_PATTERN = "^[A-Za-z0-9._@+-]+$";
 export const PASSWORD_MIN_LEN = 8;
 export const PASSWORD_MAX_LEN = 128;

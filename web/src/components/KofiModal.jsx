@@ -129,6 +129,12 @@ export default function KofiModal({ t, open, onClose }) {
       return undefined;
     }
 
+    // Closed: leave the iframe loading. Failing the wait here unmounted it, so the next
+    // open showed the blocked fallback even when Ko-fi would have arrived.
+    if (!open) {
+      return undefined;
+    }
+
     // Only catches a browser that already knows it is offline; a homelab with LAN but no
     // uplink still reports `true`, which is what the timeout is for.
     if (!navigator.onLine) {
@@ -138,7 +144,7 @@ export default function KofiModal({ t, open, onClose }) {
 
     const timer = setTimeout(() => setStatus("failed"), LOAD_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [attempt, mounted, status]);
+  }, [attempt, mounted, open, status]);
 
   if (!mounted) {
     return null;
@@ -200,6 +206,7 @@ export default function KofiModal({ t, open, onClose }) {
                   setStatus("ready");
                 }
               }}
+              tabIndex={status === "ready" ? undefined : -1}
               // While loading it is taken out of the flow rather than hidden: a
               // `display: none` frame would still fetch, but the skeleton needs the space.
               className={`w-full border-0 p-1 bg-slate-50 ${
