@@ -63,7 +63,7 @@ class FakeDocker:
             self._failed_once = True
             raise RuntimeError("boom: deploy failed")
 
-        if text == "git rev-parse HEAD":
+        if "rev-parse HEAD" in text:
             return "abc1234def5678"
 
         # Healthcheck: two containers, running, with no healthcheck of their own.
@@ -79,6 +79,9 @@ class FakeDocker:
 
     def ran(self, prefix: str) -> list[str]:
         return [c for c in self.calls if c.startswith(prefix)]
+
+    def git_ran(self, *needles: str) -> list[str]:
+        return [c for c in self.calls if c.startswith("git ") and all(n in c for n in needles)]
 
 
 UP_CMD = f"{COMPOSE_CMD} up -d --build --remove-orphans"
@@ -147,7 +150,7 @@ def test_a_stack_without_git_is_still_brought_back_up(
     success, _ = _run(fake, monkeypatch)
 
     assert success is False
-    assert not fake.ran("git reset"), "there is no repo here, nothing to reset"
+    assert not fake.git_ran("reset"), "there is no repo here, nothing to reset"
     # Two `up`: the one that failed and the recovery one.
     assert len(fake.ran(UP_CMD)) == 2
 
@@ -163,7 +166,8 @@ def test_a_git_stack_reverts_code_and_images(
     success, _ = _run(fake, monkeypatch)
 
     assert success is False
-    assert fake.ran("git reset --hard abc1234def5678")
+    assert fake.git_ran("reset --hard", "abc1234def5678")
+    assert fake.git_ran("safe.directory=")
     assert fake.images["nginx:latest"] == OLD_NGINX
     assert len(fake.ran(UP_CMD)) == 2
 
@@ -249,6 +253,55 @@ def test_a_one_shot_container_that_exited_cleanly_does_not_block_the_healthcheck
     assert len(fake.ran(UP_CMD)) == 1, "no rollback redeploy should have happened"
 
 
+def test_a_stack_of_only_one_shots_is_healthy(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Backup/certbot/migration stacks have nothing in `ps -q` once the job exits.
+
+    The health loop used `ps -q` only, waited 5 s, raised `health.no_containers` and
+    rolled back — which re-ran the one-shot.
+    """
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def only_one_shots(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text == f"{COMPOSE_CMD} ps -q":
+            fake.calls.append(text)
+            return ""
+        if text == f"{COMPOSE_CMD} ps -a -q":
+            fake.calls.append(text)
+            return "oneshot1\n"
+        if text.startswith("docker inspect "):
+            fake.calls.append(text)
+            return json.dumps([{"State": {"Status": "exited", "ExitCode": 0}}])
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", only_one_shots)
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is True, logs
+    assert len(fake.ran(UP_CMD)) == 1, "a successful one-shot stack must not be redeployed"
+
+
+def test_git_invocations_set_safe_directory(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bind-mounted clones are owned by the host user; Git 2.35+ refuses them otherwise."""
+    (stack / ".git").mkdir()
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+
+    success, _ = _run(fake, monkeypatch)
+
+    assert success is True
+    workdir = str(stack.resolve())
+    pin = f"safe.directory={workdir}"
+    assert fake.git_ran(pin, "rev-parse")
+    assert fake.git_ran(pin, "status --porcelain")
+    assert fake.git_ran(pin, "pull")
+
+
 def test_a_one_shot_container_that_exited_with_an_error_still_fails(
     stack, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -281,7 +334,7 @@ def test_a_dirty_git_tree_is_never_reset_hard(
 
     def dirty_tree(cmd, *args, **kwargs):
         text = cmd if isinstance(cmd, str) else " ".join(cmd)
-        if text == "git status --porcelain":
+        if "status --porcelain" in text:
             fake.calls.append(text)
             return " M docker-compose.yml\n"
         return original(cmd, *args, **kwargs)
@@ -291,7 +344,7 @@ def test_a_dirty_git_tree_is_never_reset_hard(
         success, logs = update_single_project_logic("myapp", db, locale="en")
 
     assert success is False
-    assert not fake.ran("git reset"), "uncommitted work would have been destroyed"
+    assert not fake.git_ran("reset"), "uncommitted work would have been destroyed"
     assert any("uncommitted" in line for line in logs)
     assert len(fake.ran(UP_CMD)) == 2, "the stack must still be brought back up"
 
@@ -307,7 +360,7 @@ def test_a_clean_git_tree_is_reset_on_failure(
     success, _ = _run(fake, monkeypatch)
 
     assert success is False
-    assert fake.ran("git reset --hard abc1234def5678")
+    assert fake.git_ran("reset --hard", "abc1234def5678")
 
 
 @pytest.mark.parametrize(

@@ -21,6 +21,8 @@ vi.mock("./lib/api", async () => {
     triggerUpdateAll: vi.fn(),
     updateProject: vi.fn(),
     createSchedule: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
   };
 });
 
@@ -36,6 +38,8 @@ import {
   createSchedule,
   triggerUpdateAll,
   updateProject,
+  login,
+  logout,
 } from "./lib/api";
 
 const t = i18n.getFixedT("es");
@@ -59,6 +63,8 @@ beforeEach(async () => {
   fetchUpdateStatus.mockResolvedValue({ is_running: false, current: 0, total: 0 });
   toggleProjectSetting.mockResolvedValue(undefined);
   updateProject.mockResolvedValue({ status: "accepted", name: "plex" });
+  login.mockResolvedValue({ username: "admin" });
+  logout.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -251,6 +257,41 @@ describe("a single-project update", () => {
 
     expect(await screen.findByText(t("alerts.update_in_progress"))).toBeInTheDocument();
   });
+
+  it("does not release the card when a poll in flight omits the name", async () => {
+    // updatingProjectsRef used to be filled before the POST, and undefined in the
+    // snapshot counted as settled. The mount's checkProgress, still in flight, then
+    // stopped the spinner while the deploy had not even started.
+    let resolveStatus;
+    fetchUpdateStatus.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        })
+    );
+    let resolveUpdate;
+    updateProject.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUpdate = resolve;
+        })
+    );
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: t("card.update_project_named", { name: "plex" }) })
+    );
+    await waitFor(() => expect(updateProject).toHaveBeenCalled());
+
+    resolveStatus({ is_running: false, current: 0, total: 0, projects: {} });
+
+    expect(await screen.findByText(t("status.updating"))).toBeInTheDocument();
+    expect(screen.queryByText(t("alerts.update_ok", { name: "plex" }))).not.toBeInTheDocument();
+
+    resolveUpdate({ status: "accepted", name: "plex" });
+  });
 });
 
 describe("the history's second page", () => {
@@ -332,5 +373,116 @@ describe("a schedule the backend refuses", () => {
     expect(await screen.findByText(detail)).toBeInTheDocument();
     // The picker and the table warnings have to agree with the server again.
     await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("the history flags when loads overlap", () => {
+  const page = (from) =>
+    Array.from({ length: 20 }, (_, i) => ({
+      id: from + i,
+      timestamp: "2026-08-05T10:00:00Z",
+      status: "SUCCESS",
+      summary: `run ${from + i}`,
+      details: "{}",
+    }));
+
+  it("ignores load-more during a refresh so the table is not left spinning", async () => {
+    fetchHistory.mockResolvedValueOnce(page(100));
+    let resolveRefresh;
+    fetchHistory.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        })
+    );
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+    fireEvent.click(screen.getAllByRole("button", { name: t("nav.history") })[0]);
+    expect(await screen.findByText("run 100")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: t("history.refresh") }));
+    fireEvent.click(screen.getByRole("button", { name: t("history.load_more") }));
+
+    expect(fetchHistory).toHaveBeenCalledTimes(2);
+
+    resolveRefresh(page(100));
+    expect(await screen.findByText("run 100")).toBeInTheDocument();
+    expect(screen.queryByText(t("history.loading"))).not.toBeInTheDocument();
+  });
+});
+
+describe("a projects scan that fails", () => {
+  it("does not draw the STACKS_PATH checklist for a 500", async () => {
+    fetchProjects.mockRejectedValue(Object.assign(new Error("Request failed (500)"), { status: 500 }));
+
+    render(<App />);
+
+    expect(await screen.findByText(t("status.projects_unavailable_title"))).toBeInTheDocument();
+    expect(screen.queryByText(t("status.empty_projects_title"))).not.toBeInTheDocument();
+    expect(await screen.findByText(t("alerts.projects_load_error"))).toBeInTheDocument();
+  });
+
+  it("keeps the list and stays online when the scan times out", async () => {
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), {
+      name: "TimeoutError",
+    });
+    fetchProjects.mockResolvedValueOnce([PLEX]).mockRejectedValueOnce(timeout);
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("plex")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: t("status.refresh_projects") }));
+
+    expect(await screen.findByText(t("alerts.projects_load_error"))).toBeInTheDocument();
+    expect(screen.getByText("plex")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: t("offline.retry") })).not.toBeInTheDocument();
+  });
+});
+
+describe("re-entering after logout", () => {
+  it("does not flash the empty STACKS_PATH panel while the next scan runs", async () => {
+    let resolveSecond;
+    fetchProjects
+      .mockResolvedValueOnce([PLEX])
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          })
+      );
+
+    render(<App />);
+    expect(await screen.findByText("plex")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: t("auth.logout") }));
+    expect(await screen.findByLabelText(t("auth.username"))).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(t("auth.username")), { target: { value: "admin" } });
+    fireEvent.change(screen.getByLabelText(t("auth.password")), { target: { value: "supersecreta" } });
+    fireEvent.submit(screen.getByLabelText(t("auth.username")).closest("form"));
+
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(t("status.empty_projects_title"))).not.toBeInTheDocument();
+    expect(screen.getByText(t("status.loading_projects"))).toBeInTheDocument();
+
+    resolveSecond([PLEX]);
+    expect(await screen.findByText("plex")).toBeInTheDocument();
+  });
+});
+
+describe("Update All when the backend refuses", () => {
+  it("does not call a connection error a 500", async () => {
+    triggerUpdateAll.mockRejectedValue(Object.assign(new Error("Request failed (500)"), { status: 500 }));
+
+    render(<App />);
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByRole("button", { name: t("status.update_all") }));
+    fireEvent.click(await screen.findByRole("button", { name: t("confirm.update_all_action") }));
+
+    expect(await screen.findByText(t("alerts.update_all_failed"))).toBeInTheDocument();
+    expect(screen.queryByText(t("alerts.backend_error"))).not.toBeInTheDocument();
   });
 });

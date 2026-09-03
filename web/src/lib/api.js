@@ -22,6 +22,11 @@ export function normalizeUiLocale(lang) {
   return base === "en" ? "en" : "es";
 }
 
+/** True when we gave up waiting, not when the TCP connection itself failed. */
+export function isTimeoutError(error) {
+  return Boolean(error) && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
 export function isBackendUnreachableError(error) {
   if (!error) {
     return false;
@@ -33,7 +38,7 @@ export function isBackendUnreachableError(error) {
   // offline card exists for. AbortSignal.timeout rejects with a DOMException named
   // "TimeoutError"; `name` is checked rather than `instanceof` so it also holds for the
   // plain object shapes the tests use.
-  if (error.name === "TimeoutError" || error.name === "AbortError") {
+  if (isTimeoutError(error)) {
     return true;
   }
   const msg = typeof error.message === "string" ? error.message : "";

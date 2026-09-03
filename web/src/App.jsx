@@ -28,6 +28,7 @@ import {
   fetchUpdateStatus,
   isAuthRedirectError,
   isBackendUnreachableError,
+  isTimeoutError,
   login,
   logout,
   normalizeUiLocale,
@@ -48,6 +49,10 @@ const DEFAULT_PROGRESS = {
 // Matches the endpoint's own default. The backend keeps HISTORY_RETENTION (200) rows and
 // has always accepted limit/offset; the UI just never asked for a second page.
 const HISTORY_PAGE_SIZE = 20;
+// After a 202, a snapshot that still omits the name may just be a poll that left
+// before `mark_running`. Five empty ticks (~5 s) is long enough to wait that out and
+// short enough to release the card if the backend restarted and never recorded it.
+const EMPTY_POLLS_BEFORE_EXPIRE = 5;
 
 /** The set of in-flight project names, in the shape ProjectCard reads. */
 function mapFromNames(names) {
@@ -123,6 +128,9 @@ export default function App() {
   // still running, so the "no projects detected, check your STACKS_PATH" panel flashed on
   // every entry and told the user their setup was broken while the data was in flight.
   const [projectsLoading, setProjectsLoading] = useState(true);
+  // Distinct from an empty scan: a 500 with `projects === []` used to draw the
+  // STACKS_PATH checklist and tell the user their mount was broken.
+  const [projectsLoadFailed, setProjectsLoadFailed] = useState(false);
   const [pendingToggles, setPendingToggles] = useState({});
   const [confirmState, setConfirmState] = useState(null);
 
@@ -145,6 +153,23 @@ export default function App() {
   // ES/EN pill used to tear down polling and re-run a full project scan — up to eight
   // `compose ps` subprocesses — plus /history and /schedules.
   const localeRef = useRef(normalizeUiLocale(i18n.language));
+  const accountCloseTimer = useRef(undefined);
+  // Whether a global update was running last time we asked. Refreshing on every "not
+  // running" answer meant the very first check, right after the mount had already
+  // loaded everything, re-ran both loads.
+  const wasUpdatingRef = useRef(false);
+  // Which projects this tab asked to update and has not yet seen resolve. See the note in
+  // checkProgress for why this is a ref and not just the state above.
+  const updatingProjectsRef = useRef(new Set());
+  // Names whose POST has returned 202. Until then an overlapping poll that omits the
+  // name is not "expired" — the backend has not been asked yet.
+  const acknowledgedRef = useRef(new Set());
+  const seenRunningRef = useRef(new Set());
+  const emptyPollsRef = useRef(new Map());
+  const historyBusyRef = useRef(null);
+  const historyOffsetRef = useRef(0);
+  const historyRequestId = useRef(0);
+  const projectsRequestId = useRef(0);
 
   useEffect(() => {
     const locale = normalizeUiLocale(i18n.language);
@@ -154,17 +179,44 @@ export default function App() {
     document.documentElement.lang = locale;
   }, [i18n.language]);
 
-  const handleUnauthorized = useCallback(() => {
+  const resetSessionUi = useCallback(() => {
     stopPolling();
+    updatingProjectsRef.current.clear();
+    acknowledgedRef.current.clear();
+    seenRunningRef.current.clear();
+    emptyPollsRef.current.clear();
+    wasUpdatingRef.current = false;
+    historyOffsetRef.current = 0;
+    historyBusyRef.current = null;
+    clearTimeout(accountCloseTimer.current);
+    setUpdatingProjects({});
+    setProjects([]);
+    setHistory([]);
+    setSchedules([]);
+    setProgress(DEFAULT_PROGRESS);
+    setProjectsLoading(true);
+    setProjectsLoadFailed(false);
+    setHistoryLoading(false);
+    setHistoryAppending(false);
+    setHistoryHasMore(false);
+    setAccountOpen(false);
+    setAccountError(null);
+    setAccountSuccess(false);
+    setConfirmState(null);
+    setSelectedLog(null);
     setAuthUsername(null);
-    setAuthState("login");
+    setAuthError(null);
   }, [stopPolling]);
 
+  const handleUnauthorized = useCallback(() => {
+    resetSessionUi();
+    setAuthState("login");
+  }, [resetSessionUi]);
+
   const handleSetupRequired = useCallback(() => {
-    stopPolling();
-    setAuthUsername(null);
+    resetSessionUi();
     setAuthState("setup");
-  }, [stopPolling]);
+  }, [resetSessionUi]);
 
   const requestContext = useMemo(
     () => ({
@@ -182,8 +234,6 @@ export default function App() {
   // Newest response wins. loadProjects is called from the mount effect, from the poll on
   // the update-finished edge and from a manual update, so a slow earlier scan could land
   // last and clobber fresher data — including reverting an optimistic toggle.
-  const projectsRequestId = useRef(0);
-
   const loadProjects = useCallback(async () => {
     const requestId = ++projectsRequestId.current;
     setProjectsLoading(true);
@@ -193,15 +243,24 @@ export default function App() {
         return;
       }
       setProjects(data);
+      setProjectsLoadFailed(false);
       setIsMockMode(false);
     } catch (error) {
       if (isAuthRedirectError(error) || requestId !== projectsRequestId.current) {
+        return;
+      }
+      // A slow scan (Pi, many stacks) aborts at 30 s while uvicorn is still working.
+      // Treating that like a dead backend drew OfflineView over a live dashboard.
+      if (isTimeoutError(error)) {
+        setProjectsLoadFailed(true);
+        pushToast("alerts.projects_load_error");
         return;
       }
       if (isBackendUnreachableError(error)) {
         if (MOCK_MODE_ALLOWED) {
           console.warn("Backend unreachable, loading mock data.", error);
           setProjects(MOCK_PROJECTS);
+          setProjectsLoadFailed(false);
           setIsMockMode(true);
           return;
         }
@@ -210,7 +269,9 @@ export default function App() {
         return;
       }
       console.error("Error loading projects", error);
-      setProjects([]);
+      // Keep whatever was on screen: wiping to [] painted the STACKS_PATH checklist
+      // over a 500, which is the opposite of what happened.
+      setProjectsLoadFailed(true);
       setIsMockMode(false);
       pushToast("alerts.projects_load_error");
     } finally {
@@ -220,21 +281,22 @@ export default function App() {
     }
   }, [pushToast, requestContext]);
 
-  // Same "newest response wins" guard as loadProjects: the update-finished edge calls
-  // loadHistory(false) while the user may have just pressed Refresh, so two loads overlap
-  // and the slower, older one used to land last and win.
-  const historyRequestId = useRef(0);
-  // How many rows are already on screen, i.e. where the next page starts. A ref because
-  // "load more" reads it in the same tick it is written.
-  const historyOffsetRef = useRef(0);
-
   const loadHistory = useCallback(
     async (allowMockFallback = true, { append = false } = {}) => {
+      // A "load more" during a refresh used to raise `historyAppending` while the
+      // refresh's finally never cleared `historyLoading`, leaving the table spinning.
+      if (append && historyBusyRef.current === "refresh") {
+        return;
+      }
       const requestId = ++historyRequestId.current;
+      historyBusyRef.current = append ? "append" : "refresh";
       // Appending must not raise `historyLoading`: that swaps the whole table body for a
       // spinner, so asking for page 2 would blank the rows the user is reading.
-      const setBusy = append ? setHistoryAppending : setHistoryLoading;
-      setBusy(true);
+      if (append) {
+        setHistoryAppending(true);
+      } else {
+        setHistoryLoading(true);
+      }
       try {
         const offset = append ? historyOffsetRef.current : 0;
         const data = await fetchHistory(requestContext, {
@@ -258,6 +320,10 @@ export default function App() {
           setHistoryHasMore(false);
           return;
         }
+        if (isTimeoutError(error)) {
+          pushToast("alerts.history_load_error");
+          return;
+        }
         if (isBackendUnreachableError(error)) {
           setAuthState("offline");
           return;
@@ -271,8 +337,12 @@ export default function App() {
         }
         pushToast("alerts.history_load_error");
       } finally {
+        // The winner clears both flags: a superseded call must not leave its sibling
+        // stuck true after it returns without touching it.
         if (requestId === historyRequestId.current) {
-          setBusy(false);
+          historyBusyRef.current = null;
+          setHistoryLoading(false);
+          setHistoryAppending(false);
         }
       }
     },
@@ -296,19 +366,16 @@ export default function App() {
     }
   }, [isMockMode, pushToast, requestContext]);
 
-  // Whether a global update was running last time we asked. Refreshing on every "not
-  // running" answer meant the very first check, right after the mount had already
-  // loaded everything, re-ran both loads: two full project scans (each up to eight
-  // `compose ps` subprocesses) and two /history calls on every entry to the dashboard.
-  const wasUpdatingRef = useRef(false);
-  const accountCloseTimer = useRef(undefined);
-  // Which projects this tab asked to update and has not yet seen resolve. See the note in
-  // checkProgress for why this is a ref and not just the state above.
-  const updatingProjectsRef = useRef(new Set());
-
   useEffect(() => () => clearTimeout(accountCloseTimer.current), []);
 
   const checkProgress = useCallback(async () => {
+    const forgetTrackedUpdate = (name) => {
+      updatingProjectsRef.current.delete(name);
+      acknowledgedRef.current.delete(name);
+      seenRunningRef.current.delete(name);
+      emptyPollsRef.current.delete(name);
+    };
+
     try {
       const data = await fetchUpdateStatus(requestContext);
 
@@ -327,17 +394,32 @@ export default function App() {
         const state = projectStates[name];
         if (state === "running") {
           someProjectRunning = true;
+          seenRunningRef.current.add(name);
+          emptyPollsRef.current.delete(name);
           continue;
         }
-        // Undefined counts as settled too — the entry expired, or the backend restarted —
-        // but with no toast: claiming "updated" for something we have no answer about is
-        // worse than saying nothing. The card is released either way.
         if (state === "success" || state === "error") {
           settled.push({ name, success: state === "success" });
-        } else {
-          resolvedSilently = true;
+          forgetTrackedUpdate(name);
+          continue;
         }
-        updatingProjectsRef.current.delete(name);
+        // Undefined used to count as settled ("expired / backend restarted"). A poll
+        // already in flight when the click added the name saw exactly that and released
+        // the card while the POST had not even reached `mark_running`.
+        if (!acknowledgedRef.current.has(name)) {
+          continue;
+        }
+        if (seenRunningRef.current.has(name)) {
+          resolvedSilently = true;
+          forgetTrackedUpdate(name);
+          continue;
+        }
+        const misses = (emptyPollsRef.current.get(name) ?? 0) + 1;
+        emptyPollsRef.current.set(name, misses);
+        if (misses >= EMPTY_POLLS_BEFORE_EXPIRE) {
+          resolvedSilently = true;
+          forgetTrackedUpdate(name);
+        }
       }
       const anyResolved = settled.length > 0 || resolvedSilently;
       if (anyResolved) {
@@ -367,8 +449,9 @@ export default function App() {
 
       setProgress(DEFAULT_PROGRESS);
       // Keep polling while any single-project deploy is still going: stopping on
-      // `!is_running` alone would abandon them halfway.
-      if (someProjectRunning) {
+      // `!is_running` alone would abandon them halfway. Names still in the set (POST
+      // in flight, or waiting for the first snapshot) count too.
+      if (someProjectRunning || updatingProjectsRef.current.size > 0) {
         startPolling(checkProgress, 1000);
         return;
       }
@@ -468,13 +551,7 @@ export default function App() {
     } catch (error) {
       console.error("Error logging out", error);
     }
-    stopPolling();
-    setProjects([]);
-    setHistory([]);
-    setSchedules([]);
-    setProgress(DEFAULT_PROGRESS);
-    setAuthUsername(null);
-    setAuthError(null);
+    resetSessionUi();
     setAuthState("login");
   };
 
@@ -626,9 +703,13 @@ export default function App() {
     try {
       await updateProject(name, requestContext);
       // 202 in hand: the deploy is running server-side and the poll owns it from here.
+      acknowledgedRef.current.add(name);
       startPolling(checkProgress, 1000);
     } catch (error) {
       updatingProjectsRef.current.delete(name);
+      acknowledgedRef.current.delete(name);
+      seenRunningRef.current.delete(name);
+      emptyPollsRef.current.delete(name);
       setUpdatingProjects(mapFromNames(updatingProjectsRef.current));
       if (error?.status === 409) {
         pushToast("alerts.update_in_progress");
@@ -670,9 +751,15 @@ export default function App() {
       }
       // 409 means another run already holds the global lock. Starting the polling here
       // would draw a progress bar for a run this click never launched.
-      pushToast(
-        error?.status === 409 ? "alerts.update_all_in_progress" : "alerts.backend_error"
-      );
+      if (error?.status === 409) {
+        pushToast("alerts.update_all_in_progress");
+      } else {
+        pushToast(
+          isBackendUnreachableError(error)
+            ? "alerts.backend_error"
+            : "alerts.update_all_failed"
+        );
+      }
     }
   };
 
@@ -974,6 +1061,7 @@ export default function App() {
             t={t}
             projects={projects}
             projectsLoading={projectsLoading}
+            projectsLoadFailed={projectsLoadFailed}
             progress={progress}
             updatingProjects={updatingProjects}
             onRefresh={loadProjects}

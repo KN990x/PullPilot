@@ -184,7 +184,10 @@ def create_initial_credentials(
             id=AUTH_ROW_ID,
             username=clean_user,
             password_hash=hash_password(password),
-            token_version=1,
+            # Not 1: the README recovery wipes the row and the wizard recreates it. A
+            # cookie from the previous account already carried v=1 for the usual username,
+            # so the session walked straight through. 2..2**31-1 will not match that.
+            token_version=secrets.randbelow(2**31 - 2) + 2,
         )
         db.add(row)
         try:

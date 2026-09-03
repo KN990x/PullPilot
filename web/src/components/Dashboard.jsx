@@ -19,6 +19,7 @@ export default function Dashboard({
   t,
   projects,
   projectsLoading,
+  projectsLoadFailed,
   progress,
   updatingProjects,
   onRefresh,
@@ -100,13 +101,26 @@ export default function Dashboard({
           <div className="flex gap-3">
             <FolderOpen className="h-8 w-8 shrink-0 text-amber-700" aria-hidden="true" />
             <div className="min-w-0 space-y-3">
-              <h3 className="font-semibold text-amber-900">{t("status.empty_projects_title")}</h3>
-              <p className="text-sm text-amber-900/90">{t("status.empty_projects_intro")}</p>
-              <ul className="list-disc space-y-2 pl-5 text-sm text-amber-900/85">
-                <li>{t("status.empty_projects_path")}</li>
-                <li>{t("status.empty_projects_compose")}</li>
-                <li>{t("status.empty_projects_volume")}</li>
-              </ul>
+              {projectsLoadFailed ? (
+                <>
+                  <h3 className="font-semibold text-amber-900">
+                    {t("status.projects_unavailable_title")}
+                  </h3>
+                  <p className="text-sm text-amber-900/90">
+                    {t("status.projects_unavailable_intro")}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="font-semibold text-amber-900">{t("status.empty_projects_title")}</h3>
+                  <p className="text-sm text-amber-900/90">{t("status.empty_projects_intro")}</p>
+                  <ul className="list-disc space-y-2 pl-5 text-sm text-amber-900/85">
+                    <li>{t("status.empty_projects_path")}</li>
+                    <li>{t("status.empty_projects_compose")}</li>
+                    <li>{t("status.empty_projects_volume")}</li>
+                  </ul>
+                </>
+              )}
             </div>
           </div>
         </div>

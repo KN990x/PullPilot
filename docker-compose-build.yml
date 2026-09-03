@@ -18,10 +18,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - pullpilot_data:/app/data
-      - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
+      - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-${PROJECTS_ROOT:-/srv/docker-stacks}}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-${PROJECTS_ROOT:-/srv/docker-stacks}}}
     environment:
       TZ: ${TZ:-UTC}
-      STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
+      STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-${PROJECTS_ROOT:-/srv/docker-stacks}}}
       PUBLIC_URL: ${PUBLIC_URL:-}
 
 volumes:

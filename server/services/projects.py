@@ -16,6 +16,16 @@ from server.services.docker import COMPOSE_CMD, run_command
 IGNORED_PROJECT_NAMES = {"pullpilot", "pullpilot-ui", "docker-updater", "data"}
 
 
+def _git_argv(workdir: str, *args: str) -> list[str]:
+    """Git argv that bind-mounted clones will accept.
+
+    Git 2.35+ refuses a repo whose directory owner is not the process user
+    (`fatal: dubious ownership`). Stacks are bind-mounted from the host and this
+    container runs as root, so every git call needs `safe.directory` set to the workdir.
+    """
+    return ["git", "-c", f"safe.directory={workdir}", *args]
+
+
 def _resolved_projects_root() -> Path:
     return PROJECTS_ROOT.resolve()
 
@@ -55,11 +65,20 @@ def compose_project_path_ok(path: Path) -> bool:
 
 
 def _compose_ps_q_ids(
-    project_path: str, *, log_exec: bool, locale: str = "es"
+    project_path: str,
+    *,
+    log_exec: bool,
+    locale: str = "es",
+    all_containers: bool = False,
 ) -> list[str]:
-    """Container IDs from `docker compose ps -q` (non-empty lines only)."""
+    """Container IDs from `docker compose ps -q` (non-empty lines only).
+
+    `all_containers=True` is `ps -a -q`: running or not. The health loop needs that
+    when every service is a one-shot that has already exited.
+    """
+    flag = "ps -a -q" if all_containers else "ps -q"
     out = run_command(
-        f"{COMPOSE_CMD} ps -q", cwd=project_path, log_exec=log_exec, locale=locale
+        f"{COMPOSE_CMD} {flag}", cwd=project_path, log_exec=log_exec, locale=locale
     )
     return [line.strip() for line in out.splitlines() if line.strip()]
 
@@ -192,10 +211,23 @@ def _wait_for_compose_healthy(
             container_ids = []
 
         if not container_ids:
-            if elapsed > 5:
-                raise RuntimeError(t("health.no_containers", locale))
-            time.sleep(1)
-            continue
+            # A stack of only one-shots (backup, certbot, a migration) has nothing
+            # running after `up -d`. `ps -q` is empty; `ps -a` still has the exited IDs.
+            # Giving up here rolled back a deploy that had in fact worked and re-ran the job.
+            try:
+                container_ids = _compose_ps_q_ids(
+                    project_path,
+                    log_exec=False,
+                    locale=locale,
+                    all_containers=True,
+                )
+            except Exception:
+                container_ids = []
+            if not container_ids:
+                if elapsed > 5:
+                    raise RuntimeError(t("health.no_containers", locale))
+                time.sleep(1)
+                continue
 
         # One call for every container, not one per container: this loop runs every two
         # seconds for up to a minute, so a six-service stack was spawning ~180 processes
@@ -308,7 +340,18 @@ def scan_projects_logic(db: Session) -> list[dict]:
     # whole table is a cheap read whatever the stack count.
     by_name = {row.name: row for row in db.query(ProjectSettings).all()}
 
-    for path in PROJECTS_ROOT.iterdir():
+    try:
+        entries = list(PROJECTS_ROOT.iterdir())
+    except OSError as exc:
+        # Same user-facing shape as a missing folder: the mount is there but unreadable
+        # (permissions, a broken bind). A 500 painted the SPA's "check STACKS_PATH" panel
+        # as if the path itself were wrong.
+        logger.warning(
+            "No se pudo listar la carpeta de stacks %s: %s", PROJECTS_ROOT, exc
+        )
+        return []
+
+    for path in entries:
         entry = path.name
         if entry.lower() in IGNORED_PROJECT_NAMES:
             continue
@@ -421,7 +464,9 @@ def update_single_project_logic(
     if is_git_repo:
         try:
             git_hash_before = run_command(
-                "git rev-parse HEAD", cwd=workdir_str, locale=locale
+                _git_argv(workdir_str, "rev-parse", "HEAD"),
+                cwd=workdir_str,
+                locale=locale,
             )
             log(
                 t("update.git_snapshot", locale, commit=git_hash_before[:7]),
@@ -432,7 +477,7 @@ def update_single_project_logic(
         try:
             git_tree_dirty = bool(
                 run_command(
-                    "git status --porcelain",
+                    _git_argv(workdir_str, "status", "--porcelain"),
                     cwd=workdir_str,
                     log_exec=False,
                     locale=locale,
@@ -457,7 +502,9 @@ def update_single_project_logic(
     try:
         if is_git_repo:
             log(t("update.git_pull", locale))
-            run_command("git pull", cwd=workdir_str, locale=locale)
+            run_command(
+                _git_argv(workdir_str, "pull"), cwd=workdir_str, locale=locale
+            )
 
         log(t("update.compose_pull", locale))
         run_command(f"{COMPOSE_CMD} pull", cwd=workdir_str, locale=locale)
@@ -493,7 +540,7 @@ def update_single_project_logic(
         elif git_hash_before:
             try:
                 run_command(
-                    ["git", "reset", "--hard", git_hash_before],
+                    _git_argv(workdir_str, "reset", "--hard", git_hash_before),
                     cwd=workdir_str,
                     locale=locale,
                 )

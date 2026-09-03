@@ -20,8 +20,8 @@ class AuthSnapshot:
     configured: bool
     token_version: int
     # The username the cookie has to name. token_version alone does not identify an
-    # account: wiping the credentials and running the wizard again starts back at 1, so a
-    # cookie issued to the previous account still matched.
+    # account: wiping the credentials and running the wizard again used to start back
+    # at 1, so a cookie issued to the previous account still matched.
     username: str | None = None
 
 

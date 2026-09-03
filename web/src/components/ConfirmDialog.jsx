@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 
 import { useBodyScrollLock } from "../hooks/useBodyScrollLock";
@@ -22,10 +23,27 @@ export default function ConfirmDialog({
 }) {
   const { dialogRef, initialFocusRef } = useFocusTrap({ open, onClose: onCancel });
   useBodyScrollLock(open);
+  // A ref, not state: two clicks in the same tick (before React re-renders) both saw
+  // `submitted === false` and fired the action twice — Update All 409, or delete then 404.
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (open) {
+      firedRef.current = false;
+    }
+  }, [open]);
 
   if (!open) {
     return null;
   }
+
+  const handleConfirm = () => {
+    if (firedRef.current) {
+      return;
+    }
+    firedRef.current = true;
+    onConfirm();
+  };
 
   return (
     <div
@@ -83,7 +101,7 @@ export default function ConfirmDialog({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
+            onClick={handleConfirm}
             className="w-full sm:w-auto min-h-11 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
           >
             {confirmLabel ?? t("common.confirm")}

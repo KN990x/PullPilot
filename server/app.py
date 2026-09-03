@@ -155,10 +155,10 @@ async def auth_middleware(request: Request, call_next):
             )
         return await call_next(request)
 
-    # The username is compared, not just its presence: token_version restarts at 1 when
-    # the credentials are wiped and the wizard is run again (the recovery the README
-    # documents), so a cookie from the previous account used to walk straight through
-    # while /api/auth/status — which does compare it — reported nobody logged in.
+    # The username is compared, not just its presence: a wipe-and-wizard used to recreate
+    # the row with token_version=1, which is what the previous account's cookie already
+    # carried, so the old session walked straight through while /api/auth/status reported
+    # nobody logged in. The initial version is now random; the username check remains.
     user = request.session.get("user")
     version = request.session.get("v")
     if not user or user != snapshot.username or version != snapshot.token_version:

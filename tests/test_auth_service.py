@@ -71,7 +71,7 @@ def test_setup_lifecycle(db_session: Session) -> None:
 
     assert auth_service.is_setup_complete(db_session) is True
     assert row.username == "admin"
-    assert row.token_version == 1
+    assert row.token_version >= 2
     assert "supersecreta" not in row.password_hash
 
 
@@ -108,18 +108,21 @@ def test_change_credentials_requires_current_password(db_session: Session) -> No
 
 
 def test_change_credentials_bumps_token_version(db_session: Session) -> None:
-    auth_service.create_initial_credentials(db_session, username="admin", password="supersecreta")
+    created = auth_service.create_initial_credentials(
+        db_session, username="admin", password="supersecreta"
+    )
+    initial = created.token_version
 
     row = auth_service.change_credentials(
         db_session, current_password="supersecreta", new_password="nuevacontra"
     )
-    assert row.token_version == 2
+    assert row.token_version == initial + 1
     assert auth_service.verify_credentials(db_session, username="admin", password="nuevacontra")
 
     row = auth_service.change_credentials(
         db_session, current_password="nuevacontra", new_username="otro"
     )
-    assert row.token_version == 3
+    assert row.token_version == initial + 2
     assert row.username == "otro"
 
 

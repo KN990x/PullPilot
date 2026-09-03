@@ -9,12 +9,12 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - pullpilot_data:/app/data
       # Same path on the host and in the container, so the `docker compose` calls
-      # PullPilot makes find the stacks where the host keeps them. DOCKER_ROOT_PATH is the
-      # old name and is still accepted.
-      - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
+      # PullPilot makes find the stacks where the host keeps them. DOCKER_ROOT_PATH and
+      # PROJECTS_ROOT are the old names and are still accepted.
+      - ${STACKS_PATH:-${DOCKER_ROOT_PATH:-${PROJECTS_ROOT:-/srv/docker-stacks}}}:${STACKS_PATH:-${DOCKER_ROOT_PATH:-${PROJECTS_ROOT:-/srv/docker-stacks}}}
     environment:
       TZ: ${TZ:-UTC}
-      STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-/srv/docker-stacks}}
+      STACKS_PATH: ${STACKS_PATH:-${DOCKER_ROOT_PATH:-${PROJECTS_ROOT:-/srv/docker-stacks}}}
       # Only behind a reverse proxy, e.g. https://pullpilot.example.com
       PUBLIC_URL: ${PUBLIC_URL:-}
 

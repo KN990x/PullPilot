@@ -101,6 +101,9 @@ const resources = {
           "2) Cada proyecto es una subcarpeta con docker-compose.yml o docker-compose.yaml.",
         empty_projects_volume:
           "3) El compose oficial monta esa ruta igual en host y contenedor. Tras cambiar el .env: docker compose up -d.",
+        projects_unavailable_title: "No se pudieron cargar los proyectos",
+        projects_unavailable_intro:
+          "El backend respondió con error. No es un problema de STACKS_PATH: reintenta o mira los logs del contenedor.",
       },
       card: {
         containers: "Contenedores",
@@ -195,6 +198,8 @@ const resources = {
         update_in_progress: "Ese proyecto ya se está actualizando. Espera a que termine.",
         update_all_in_progress:
           "Ya hay una actualización global en curso. Espera a que termine.",
+        update_all_failed:
+          "No se pudo iniciar la actualización global. Mira el historial o los logs.",
       },
       confirm: {
         update_all_title: "Actualizar todo el homelab",
@@ -329,6 +334,9 @@ const resources = {
           "2) Each project is a subfolder with docker-compose.yml or docker-compose.yaml.",
         empty_projects_volume:
           "3) The official compose bind-mounts that path identically on host and container. After changing .env: docker compose up -d.",
+        projects_unavailable_title: "Projects could not be loaded",
+        projects_unavailable_intro:
+          "The backend returned an error. This is not a STACKS_PATH problem: retry, or check the container logs.",
       },
       card: {
         containers: "Containers",
@@ -422,6 +430,8 @@ const resources = {
         update_in_progress: "That project is already being updated. Wait for it to finish.",
         update_all_in_progress:
           "A global update is already running. Wait for it to finish.",
+        update_all_failed:
+          "Could not start the global update. Check the history or the container logs.",
       },
       confirm: {
         update_all_title: "Update the whole homelab",

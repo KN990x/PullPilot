@@ -149,7 +149,7 @@ export default function HistoryView({
             <button
               type="button"
               onClick={onLoadMore}
-              disabled={appending}
+              disabled={appending || historyLoading}
               className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed min-h-11 inline-flex items-center"
             >
               {appending ? t("history.loading") : t("history.load_more")}

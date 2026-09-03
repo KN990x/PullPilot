@@ -762,3 +762,18 @@ def test_an_empty_scan_never_prunes(
         assert db.query(ProjectSettings).filter_by(name="plex").first() is not None
     finally:
         db.close()
+
+
+def test_an_unreadable_stacks_folder_returns_an_empty_list(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mount that exists but cannot be listed used to 500 the dashboard scan."""
+    from unittest.mock import MagicMock
+
+    root = MagicMock()
+    root.exists.return_value = True
+    root.iterdir.side_effect = PermissionError("EACCES")
+    monkeypatch.setattr(projects_module, "PROJECTS_ROOT", root)
+    response = client.get("/api/projects")
+    assert response.status_code == 200
+    assert response.json() == []

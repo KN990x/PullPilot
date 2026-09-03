@@ -119,8 +119,8 @@ Day-to-day: `make dev` runs the backend and the Vite dev server together (see [`
 - **Password recovery:** there is no automatic reset. Stop the container, delete the stored credentials, and the wizard comes back:
   ```bash
   docker compose stop pullpilot
-  docker run --rm -v pullpilot_data:/data alpine sh -c \
-    "apk add --no-cache sqlite >/dev/null && sqlite3 /data/pullpilot.db 'DELETE FROM auth_credentials;'"
+  docker compose run --rm --no-deps --entrypoint python pullpilot -c \
+    "import sqlite3; db=sqlite3.connect('/app/data/pullpilot.db'); db.execute('DELETE FROM auth_credentials'); db.commit()"
   docker compose start pullpilot
   ```
   Anyone able to run that already has the host and therefore the Docker socket, so this is maintenance, not a privilege escalation.
@@ -224,8 +224,8 @@ Día a día: `make dev` levanta el backend y el servidor de Vite a la vez (véas
 - **Recuperación de la contraseña:** no hay reseteo automático. Para el contenedor, borra las credenciales guardadas y el asistente vuelve a salir:
   ```bash
   docker compose stop pullpilot
-  docker run --rm -v pullpilot_data:/data alpine sh -c \
-    "apk add --no-cache sqlite >/dev/null && sqlite3 /data/pullpilot.db 'DELETE FROM auth_credentials;'"
+  docker compose run --rm --no-deps --entrypoint python pullpilot -c \
+    "import sqlite3; db=sqlite3.connect('/app/data/pullpilot.db'); db.execute('DELETE FROM auth_credentials'); db.commit()"
   docker compose start pullpilot
   ```
   Quien pueda ejecutar eso ya tiene el host y, por tanto, el socket de Docker: es mantenimiento, no una escalada de privilegios.
@@ -246,4 +246,4 @@ Todo es opcional. Copia [`.env.example`](./.env.example) a `.env` junto al `dock
 | `TZ` | `UTC` | Zona horaria del contenedor — la que usan las tareas programadas. |
 | `PUBLIC_URL` | (sin definir) | Solo con un proxy inverso delante. Con `https://` la cookie de sesión se marca `Secure` y el rate limit de login lee `X-Forwarded-For`. |
 
-Todo lo que antes era configurable — el secreto de sesión, el `SameSite` de la cookie, los orígenes CORS, los timeouts de comandos, el límite de intentos de login, la ruta de los estáticos — ahora se genera solo o es una constante con un valor sensato. Si tenías `DOCKER_ROOT_PATH` en un `.env` antiguo, sigue funcionando: se lee como alias de `STACKS_PATH`. `DATA_DIR` también existe, pero es interna: el contenedor la fija a `/app/data` y `make dev-server` la apunta a `.devdata`. No forma parte de las cuatro y no hay motivo para ponerla.
+Todo lo que antes era configurable — el secreto de sesión, el `SameSite` de la cookie, los orígenes CORS, los timeouts de comandos, el límite de intentos de login, la ruta de los estáticos — ahora se genera solo o es una constante con un valor sensato. Si tenías `DOCKER_ROOT_PATH` o `PROJECTS_ROOT` en un `.env` antiguo, siguen funcionando: ambos se leen como alias de `STACKS_PATH`, en ese orden de precedencia. `DATA_DIR` también existe, pero es interna: el contenedor la fija a `/app/data` y `make dev-server` la apunta a `.devdata`. No forma parte de las cuatro y no hay motivo para ponerla.

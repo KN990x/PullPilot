@@ -4,6 +4,7 @@ import {
   fetchProjects,
   handleAuthError,
   isBackendUnreachableError,
+  isTimeoutError,
   login,
   normalizeUiLocale,
   SESSION_EXPIRED_ERROR,
@@ -53,6 +54,16 @@ describe("isBackendUnreachableError", () => {
     // used to fire on any network error and show invented projects instead.
     expect(isBackendUnreachableError(new Error("Request failed (500)"))).toBe(false);
     expect(isBackendUnreachableError(null)).toBe(false);
+  });
+});
+
+describe("isTimeoutError", () => {
+  it("recognises the abort the scan uses when Docker is slow", () => {
+    expect(isTimeoutError(Object.assign(new Error("timeout"), { name: "TimeoutError" }))).toBe(
+      true
+    );
+    expect(isTimeoutError(Object.assign(new Error("aborted"), { name: "AbortError" }))).toBe(true);
+    expect(isTimeoutError(new TypeError("Failed to fetch"))).toBe(false);
   });
 });
 
