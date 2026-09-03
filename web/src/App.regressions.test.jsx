@@ -112,6 +112,32 @@ describe("a progress poll that fails", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: t("offline.retry") })).not.toBeInTheDocument();
   });
+
+  it("releases the cards when the poll returns 500", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const boom = Object.assign(new Error("Request failed (500)"), { status: 500 });
+      fetchUpdateStatus
+        .mockResolvedValueOnce({ is_running: false, current: 0, total: 0, projects: {} })
+        .mockRejectedValue(boom);
+
+      render(<App />);
+      await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: t("card.update_project_named", { name: "plex" }) })
+      );
+      await waitFor(() => expect(updateProject).toHaveBeenCalled());
+      expect(screen.getByText(t("status.updating"))).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(1200);
+
+      expect(await screen.findByText(t("alerts.progress_error"))).toBeInTheDocument();
+      expect(screen.queryByText(t("status.updating"))).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("the optimistic toggles", () => {
@@ -204,6 +230,37 @@ describe("Update All when one is already running", () => {
     expect(await screen.findByText(t("alerts.update_all_in_progress"))).toBeInTheDocument();
     // No progress bar: the run is somebody else's.
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("follows a real is_running snapshot after a 409", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const conflict = Object.assign(new Error("Request failed (409)"), { status: 409 });
+      triggerUpdateAll.mockRejectedValue(conflict);
+      fetchUpdateStatus
+        .mockResolvedValueOnce({ is_running: false, current: 0, total: 0 })
+        .mockResolvedValue({
+          is_running: true,
+          current: 1,
+          total: 2,
+          current_project: "plex",
+        });
+
+      render(<App />);
+      await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+      fireEvent.click(await screen.findByRole("button", { name: t("status.update_all") }));
+      fireEvent.click(await screen.findByRole("button", { name: t("confirm.update_all_action") }));
+
+      expect(await screen.findByText(t("alerts.update_all_in_progress"))).toBeInTheDocument();
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(1200);
+
+      expect(await screen.findByRole("progressbar")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -326,6 +383,56 @@ describe("the history's second page", () => {
     // Both pages on screen: the first must not be thrown away.
     expect(await screen.findByText("run 80")).toBeInTheDocument();
     expect(screen.getByText("run 100")).toBeInTheDocument();
+  });
+
+  it("asks for the already-visible rows after an update finishes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const page = (from) =>
+        Array.from({ length: 20 }, (_, i) => ({
+          id: from + i,
+          timestamp: "2026-08-05T10:00:00Z",
+          status: "SUCCESS",
+          summary: `run ${from + i}`,
+          details: "{}",
+        }));
+      fetchHistory
+        .mockResolvedValueOnce(page(100))
+        .mockResolvedValueOnce(page(80))
+        .mockResolvedValue([...page(100), ...page(80)]);
+      fetchUpdateStatus
+        .mockResolvedValueOnce({ is_running: false, current: 0, total: 0, projects: {} })
+        .mockResolvedValue({
+          is_running: false,
+          current: 0,
+          total: 0,
+          projects: { plex: "success" },
+        });
+
+      render(<App />);
+      await waitFor(() => expect(fetchProjects).toHaveBeenCalled());
+
+      fireEvent.click(screen.getAllByRole("button", { name: t("nav.history") })[0]);
+      expect(await screen.findByText("run 100")).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: t("history.load_more") }));
+      expect(await screen.findByText("run 80")).toBeInTheDocument();
+
+      fireEvent.click(screen.getAllByRole("button", { name: t("nav.dashboard") })[0]);
+      fireEvent.click(
+        await screen.findByRole("button", { name: t("card.update_project_named", { name: "plex" }) })
+      );
+      await waitFor(() => expect(updateProject).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(1200);
+
+      await waitFor(() =>
+        expect(fetchHistory).toHaveBeenCalledWith(expect.anything(), {
+          limit: 40,
+          offset: 0,
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -484,5 +591,16 @@ describe("Update All when the backend refuses", () => {
 
     expect(await screen.findByText(t("alerts.update_all_failed"))).toBeInTheDocument();
     expect(screen.queryByText(t("alerts.backend_error"))).not.toBeInTheDocument();
+  });
+});
+
+describe("schedules after leaving the tab", () => {
+  it("reloads them when the tab becomes visible again", async () => {
+    render(<App />);
+    await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(1));
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => expect(fetchSchedules).toHaveBeenCalledTimes(2));
   });
 });

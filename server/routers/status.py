@@ -21,15 +21,14 @@ def trigger_update_all(
     background_tasks: BackgroundTasks,
     locale: str = Depends(get_request_locale),
 ):
-    # Informational, like locks.is_busy: global_update_job's own acquire(blocking=False)
-    # stays the real guard. Without it the endpoint answered 200 "started" while the job
-    # returned after one log line, and the SPA drew a progress bar for a run that was
-    # never launched. Mirrors the 409 the per-project update already answers.
-    if global_update_lock.locked():
+    # Taken here, released by the job: checking `locked()` and acquiring in the task is
+    # the same check-then-act the per-project update already closed. Two POSTs could both
+    # answer 200 and the second job would exit on the first line.
+    if not global_update_lock.acquire(blocking=False):
         raise HTTPException(
             status_code=409, detail=t("http.update_all_in_progress", locale)
         )
-    background_tasks.add_task(global_update_job, locale)
+    background_tasks.add_task(global_update_job, locale, already_locked=True)
     return {"message": t("api.update_all_started", locale)}
 
 

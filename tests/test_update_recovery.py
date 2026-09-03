@@ -393,6 +393,30 @@ def test_the_healthcheck_rejects_a_broken_container(
     assert len(fake.ran(UP_CMD)) == 2, "the rollback redeploy must still run"
 
 
+def test_health_null_does_not_trigger_a_rollback(
+    stack, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`Health: null` is a present key: `.get("Health", {})` still returns None."""
+    fake = FakeDocker(images={"nginx:latest": OLD_NGINX, "redis:7": OLD_REDIS})
+    original = fake.__call__
+
+    def with_null_health(cmd, *args, **kwargs):
+        text = cmd if isinstance(cmd, str) else " ".join(cmd)
+        if text.startswith("docker inspect "):
+            fake.calls.append(text)
+            return json.dumps(
+                [{"State": {"Status": "running", "Health": None}}] * 2
+            )
+        return original(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(projects_module, "run_command", with_null_health)
+    with session_scope() as db:
+        success, logs = update_single_project_logic("myapp", db, locale="en")
+
+    assert success is True, logs
+    assert len(fake.ran(UP_CMD)) == 1, "no rollback redeploy should have happened"
+
+
 class FakeClock:
     """`time` for the health loop: sleeping advances the clock instead of the wall.
 

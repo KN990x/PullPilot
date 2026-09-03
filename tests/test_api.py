@@ -1,12 +1,14 @@
+import threading
 from datetime import UTC, datetime
 
 import pytest
 import server.routers.projects as projects_router_module
+import server.routers.status as status_router_module
 import server.services.projects as projects_module
 from fastapi.testclient import TestClient
 from server.database import SessionLocal
 from server.locale.log_messages import t
-from server.models.db import ProjectSettings, UpdateLog
+from server.models.db import ProjectSettings, ScheduledTask, UpdateLog
 from server.services import locks
 from server.services.update_logs import persist_update_log
 
@@ -586,6 +588,45 @@ def test_update_all_is_rejected_while_one_is_running(client: TestClient) -> None
     assert client.post("/api/update-all").status_code == 200
 
 
+def test_second_concurrent_update_all_gets_409(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two POSTs used to both answer 200: the endpoint only looked at `locked()`."""
+    from server.services.scheduler import global_update_lock
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def _blocking_job(locale=None, *, already_locked=False):
+        try:
+            started.set()
+            release.wait(timeout=5)
+        finally:
+            # The endpoint took the lock; the real job's finally is what gives it back.
+            global_update_lock.release()
+
+    # Patched on the router, not the source module: status.py binds the name at import
+    # time (pitfall 1 in AGENTS.md).
+    monkeypatch.setattr(status_router_module, "global_update_job", _blocking_job)
+
+    first: dict[str, int] = {}
+
+    def _run_first():
+        first["status"] = client.post("/api/update-all").status_code
+
+    worker = threading.Thread(target=_run_first)
+    worker.start()
+    try:
+        assert started.wait(timeout=5), "the first update-all never started"
+        second = client.post("/api/update-all")
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert second.status_code == 409
+    assert first["status"] == 200
+
+
 def test_history_pages_do_not_repeat_rows_sharing_a_timestamp(
     client: TestClient,
 ) -> None:
@@ -697,6 +738,17 @@ def test_scan_retires_rows_for_stacks_that_are_gone(
     monkeypatch.setattr(projects_module, "run_command", lambda *_a, **_kw: "")
 
     assert len(client.get("/api/projects").json()) == 2
+    created = client.post(
+        "/api/schedules",
+        json={
+            "target": "pihole",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 4,
+            "minute": 0,
+        },
+    )
+    assert created.status_code == 200, created.text
 
     import shutil
 
@@ -706,8 +758,11 @@ def test_scan_retires_rows_for_stacks_that_are_gone(
     db = SessionLocal()
     try:
         assert db.query(ProjectSettings).filter_by(name="pihole").first() is None
+        row = db.query(ScheduledTask).filter_by(target="pihole").first()
+        assert row is not None and row.active is False
     finally:
         db.close()
+    assert client.get("/api/schedules").json() == []
 
 
 def test_scan_keeps_a_gone_stack_that_still_carries_settings(
@@ -726,6 +781,17 @@ def test_scan_keeps_a_gone_stack_that_still_carries_settings(
     monkeypatch.setattr(projects_module, "run_command", lambda *_a, **_kw: "")
 
     assert len(client.get("/api/projects").json()) == 2
+    created = client.post(
+        "/api/schedules",
+        json={
+            "target": "pihole",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 4,
+            "minute": 0,
+        },
+    )
+    assert created.status_code == 200, created.text
     assert client.post("/api/projects/pihole/toggle_exclude").status_code == 200
 
     import shutil
@@ -737,8 +803,11 @@ def test_scan_keeps_a_gone_stack_that_still_carries_settings(
     try:
         row = db.query(ProjectSettings).filter_by(name="pihole").first()
         assert row is not None and row.excluded is True
+        task = db.query(ScheduledTask).filter_by(target="pihole").first()
+        assert task is not None and task.active is True
     finally:
         db.close()
+    assert any(s["target"] == "pihole" for s in client.get("/api/schedules").json())
 
 
 def test_an_empty_scan_never_prunes(

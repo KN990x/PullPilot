@@ -53,6 +53,8 @@ const HISTORY_PAGE_SIZE = 20;
 // before `mark_running`. Five empty ticks (~5 s) is long enough to wait that out and
 // short enough to release the card if the backend restarted and never recorded it.
 const EMPTY_POLLS_BEFORE_EXPIRE = 5;
+const LIVE_POLL_MS = 1000;
+const IDLE_POLL_MS = 5000;
 
 /** The set of in-flight project names, in the shape ProjectCard reads. */
 function mapFromNames(names) {
@@ -170,6 +172,8 @@ export default function App() {
   const historyOffsetRef = useRef(0);
   const historyRequestId = useRef(0);
   const projectsRequestId = useRef(0);
+  const sessionGenerationRef = useRef(0);
+  const authStateRef = useRef(authState);
 
   useEffect(() => {
     const locale = normalizeUiLocale(i18n.language);
@@ -179,7 +183,12 @@ export default function App() {
     document.documentElement.lang = locale;
   }, [i18n.language]);
 
+  useEffect(() => {
+    authStateRef.current = authState;
+  }, [authState]);
+
   const resetSessionUi = useCallback(() => {
+    sessionGenerationRef.current += 1;
     stopPolling();
     updatingProjectsRef.current.clear();
     acknowledgedRef.current.clear();
@@ -265,6 +274,8 @@ export default function App() {
           return;
         }
         // Updating or down. A retry screen is honest; fake data is not.
+        sessionGenerationRef.current += 1;
+        authStateRef.current = "offline";
         setAuthState("offline");
         return;
       }
@@ -298,9 +309,14 @@ export default function App() {
         setHistoryLoading(true);
       }
       try {
-        const offset = append ? historyOffsetRef.current : 0;
+        const loaded = historyOffsetRef.current;
+        const offset = append ? loaded : 0;
+        // A refresh after "load more" used to ask for 20 and throw away every extra page.
+        const limit = append
+          ? HISTORY_PAGE_SIZE
+          : Math.max(HISTORY_PAGE_SIZE, loaded);
         const data = await fetchHistory(requestContext, {
-          limit: HISTORY_PAGE_SIZE,
+          limit,
           offset,
         });
         if (requestId !== historyRequestId.current) {
@@ -308,7 +324,7 @@ export default function App() {
         }
         // A short page is the end of the table: the endpoint caps `limit` at
         // HISTORY_RETENTION, so there is no other signal that there is nothing more.
-        setHistoryHasMore(data.length === HISTORY_PAGE_SIZE);
+        setHistoryHasMore(data.length === limit);
         historyOffsetRef.current = offset + data.length;
         setHistory((prev) => (append ? [...prev, ...data] : data));
       } catch (error) {
@@ -325,6 +341,8 @@ export default function App() {
           return;
         }
         if (isBackendUnreachableError(error)) {
+          sessionGenerationRef.current += 1;
+          authStateRef.current = "offline";
           setAuthState("offline");
           return;
         }
@@ -369,6 +387,10 @@ export default function App() {
   useEffect(() => () => clearTimeout(accountCloseTimer.current), []);
 
   const checkProgress = useCallback(async () => {
+    const generation = sessionGenerationRef.current;
+    const stillThisSession = () =>
+      generation === sessionGenerationRef.current && authStateRef.current === "ready";
+
     const forgetTrackedUpdate = (name) => {
       updatingProjectsRef.current.delete(name);
       acknowledgedRef.current.delete(name);
@@ -378,6 +400,9 @@ export default function App() {
 
     try {
       const data = await fetchUpdateStatus(requestContext);
+      if (!stillThisSession()) {
+        return;
+      }
 
       // Per-project deploys run in the background too now, so the same poll reports both.
       // Anything this tab started and that has since resolved gets its toast here.
@@ -435,15 +460,21 @@ export default function App() {
       }
       if (anyResolved) {
         await loadProjects();
+        if (!stillThisSession()) {
+          return;
+        }
         // The history row is written by the same background task, so a per-project update
         // refreshes it too. It used to be written and never shown until a manual refresh.
         await loadHistory(false);
+        if (!stillThisSession()) {
+          return;
+        }
       }
 
       if (data.is_running) {
         wasUpdatingRef.current = true;
         setProgress(data);
-        startPolling(checkProgress, 1000);
+        startPolling(checkProgress, LIVE_POLL_MS);
         return;
       }
 
@@ -452,18 +483,30 @@ export default function App() {
       // `!is_running` alone would abandon them halfway. Names still in the set (POST
       // in flight, or waiting for the first snapshot) count too.
       if (someProjectRunning || updatingProjectsRef.current.size > 0) {
-        startPolling(checkProgress, 1000);
+        startPolling(checkProgress, LIVE_POLL_MS);
         return;
       }
 
-      stopPolling();
+      // Idle ticks watch for a GLOBAL the scheduler started while this tab was at rest.
+      // Stopping entirely meant a cron could run with the UI open and never paint.
+      startPolling(checkProgress, IDLE_POLL_MS);
       // Only on the running -> finished edge: that is when the data actually changed.
       if (wasUpdatingRef.current) {
         wasUpdatingRef.current = false;
         await loadProjects();
+        if (!stillThisSession()) {
+          return;
+        }
         await loadHistory(false);
+        if (!stillThisSession()) {
+          return;
+        }
+        await loadSchedules();
       }
     } catch (error) {
+      if (!stillThisSession()) {
+        return;
+      }
       if (isAuthRedirectError(error)) {
         return;
       }
@@ -475,16 +518,26 @@ export default function App() {
       stopPolling();
       setProgress(DEFAULT_PROGRESS);
       if (isBackendUnreachableError(error)) {
+        sessionGenerationRef.current += 1;
+        authStateRef.current = "offline";
         wasUpdatingRef.current = true;
         setAuthState("offline");
         return;
       }
+      // A 500 used to leave updatingProjectsRef populated, so every card stayed
+      // "Actualizando…" until a full reload.
+      updatingProjectsRef.current.clear();
+      acknowledgedRef.current.clear();
+      seenRunningRef.current.clear();
+      emptyPollsRef.current.clear();
+      setUpdatingProjects({});
       console.error("Error checking progress", error);
       pushToast("alerts.progress_error");
     }
   }, [
     loadHistory,
     loadProjects,
+    loadSchedules,
     pushToast,
     requestContext,
     startPolling,
@@ -544,6 +597,19 @@ export default function App() {
     checkProgress();
     return () => stopPolling();
   }, [authState, checkProgress, loadHistory, loadProjects, loadSchedules, stopPolling]);
+
+  useEffect(() => {
+    if (authState !== "ready") {
+      return undefined;
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadSchedules();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [authState, loadSchedules]);
 
   const handleLogout = async () => {
     try {
@@ -704,7 +770,7 @@ export default function App() {
       await updateProject(name, requestContext);
       // 202 in hand: the deploy is running server-side and the poll owns it from here.
       acknowledgedRef.current.add(name);
-      startPolling(checkProgress, 1000);
+      startPolling(checkProgress, LIVE_POLL_MS);
     } catch (error) {
       updatingProjectsRef.current.delete(name);
       acknowledgedRef.current.delete(name);
@@ -713,6 +779,7 @@ export default function App() {
       setUpdatingProjects(mapFromNames(updatingProjectsRef.current));
       if (error?.status === 409) {
         pushToast("alerts.update_in_progress");
+        startPolling(checkProgress, LIVE_POLL_MS);
       } else if (!isAuthRedirectError(error)) {
         // "Error connecting to backend" was wrong here: the backend answered and refused
         // to start. A deploy that starts and then fails is reported by checkProgress.
@@ -744,15 +811,16 @@ export default function App() {
         total: 1,
         current_project: t("status.starting"),
       });
-      startPolling(checkProgress, 1000);
+      startPolling(checkProgress, LIVE_POLL_MS);
     } catch (error) {
       if (isAuthRedirectError(error)) {
         return;
       }
-      // 409 means another run already holds the global lock. Starting the polling here
-      // would draw a progress bar for a run this click never launched.
+      // 409 means another run already holds the global lock. Do not fake is_running:
+      // the bar has to come from the snapshot. The poll is what follows that run.
       if (error?.status === 409) {
         pushToast("alerts.update_all_in_progress");
+        startPolling(checkProgress, LIVE_POLL_MS);
       } else {
         pushToast(
           isBackendUnreachableError(error)
@@ -1064,7 +1132,10 @@ export default function App() {
             projectsLoadFailed={projectsLoadFailed}
             progress={progress}
             updatingProjects={updatingProjects}
-            onRefresh={loadProjects}
+            onRefresh={() => {
+              loadProjects();
+              checkProgress();
+            }}
             onUpdateAll={handleUpdateAll}
             onUpdateProject={handleUpdateProject}
             onToggleSetting={toggleSetting}

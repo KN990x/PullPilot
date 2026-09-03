@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from server.config import HEALTHCHECK_TIMEOUT, PROJECTS_ROOT, logger
 from server.locale.log_messages import t
-from server.models.db import ProjectSettings
+from server.models.db import ProjectSettings, ScheduledTask
 from server.services.docker import COMPOSE_CMD, run_command
 
 IGNORED_PROJECT_NAMES = {"pullpilot", "pullpilot-ui", "docker-updater", "data"}
@@ -258,7 +258,9 @@ def _wait_for_compose_healthy(
         for container_id, data in zip(container_ids, inspected, strict=True):
             state = data.get("State", {})
             status = state.get("Status")
-            health = state.get("Health", {}).get("Status")
+            # `Health: null` is a present key, not a missing one: `.get("Health", {})`
+            # still returns None and `.get("Status")` on it used to raise and roll back.
+            health = (state.get("Health") or {}).get("Status")
             cid = container_id[:12]
 
             if status == "restarting":
@@ -292,7 +294,7 @@ def _wait_for_compose_healthy(
         time.sleep(2)
 
 
-def _prune_orphan_projects(db: Session, seen: set[str]) -> bool:
+def _prune_orphan_projects(db: Session, seen: set[str]) -> list[str]:
     """Drop rows for stacks that are gone, but only the ones carrying no settings.
 
     The table only ever grew, like the history and the two lock registries before it. It is
@@ -302,12 +304,13 @@ def _prune_orphan_projects(db: Session, seen: set[str]) -> bool:
     user had fenced off would then be a silent, unrecoverable change. A row with default
     settings has nothing to lose: the next scan recreates it identically.
 
-    Returns whether anything was deleted, so the caller commits.
+    Returns the names that were deleted, so the caller can retire their schedules and
+    commit once.
     """
     # Nothing found at all is the shape of a bad mount far more often than of a homelab
     # with zero stacks, and pruning is never urgent enough to risk acting on it.
     if not seen:
-        return False
+        return []
 
     orphans = (
         db.query(ProjectSettings)
@@ -318,14 +321,21 @@ def _prune_orphan_projects(db: Session, seen: set[str]) -> bool:
         )
         .all()
     )
+    names = [row.name for row in orphans]
     for row in orphans:
         db.delete(row)
-    if orphans:
+    if names:
+        # Same symptom the create endpoint already refuses: a schedule whose target is
+        # gone stayed active, fired, logged one line, and the UI listed it forever.
+        db.query(ScheduledTask).filter(
+            ScheduledTask.target.in_(names),
+            ScheduledTask.active.is_(True),
+        ).update({"active": False}, synchronize_session=False)
         logger.info(
             "Escaneo: %s proyecto(s) sin carpeta y sin ajustes retirados de la BD.",
-            len(orphans),
+            len(names),
         )
-    return bool(orphans)
+    return names
 
 
 def scan_projects_logic(db: Session) -> list[dict]:
@@ -376,7 +386,8 @@ def scan_projects_logic(db: Session) -> list[dict]:
 
         ordered.append((entry, path, proj))
 
-    if _prune_orphan_projects(db, {entry for entry, _path, _proj in ordered}):
+    pruned_names = _prune_orphan_projects(db, {entry for entry, _path, _proj in ordered})
+    if pruned_names:
         pending_db_write = True
 
     if pending_db_write:
@@ -387,6 +398,12 @@ def scan_projects_logic(db: Session) -> list[dict]:
             logger.warning(
                 "No se pudo persistir cambios del escaneo de proyectos (altas o rutas)."
             )
+        else:
+            if pruned_names:
+                # Lazy: scheduler imports this module at load time.
+                from server.services.scheduler import refresh_scheduler_jobs
+
+                refresh_scheduler_jobs()
 
     status_by_entry: dict[str, tuple[str, int]] = {}
     if ordered:

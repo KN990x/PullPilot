@@ -30,8 +30,10 @@ scheduler = BackgroundScheduler()
 
 global_update_lock = Lock()
 # Guards the status dict above, which the job thread mutates while HTTP readers snapshot
-# it, and the remove-all-then-re-add in refresh_scheduler_jobs.
+# it. Nesting this with update_state's lock is how deadlocks start; keep them apart.
 _status_lock = Lock()
+# Serialises add/remove of jobs. Create and delete both refresh; two overlapping calls
+# used to drop every job, then each re-add a different snapshot.
 _refresh_lock = Lock()
 
 
@@ -119,10 +121,12 @@ def build_trigger(
     raise ValueError(t("schedule.unsupported_type", locale, task_type=task_type))
 
 
-def global_update_job(locale: str | None = None) -> None:
+def global_update_job(locale: str | None = None, *, already_locked: bool = False) -> None:
     loc = locale if locale is not None else LOG_LOCALE
 
-    if not global_update_lock.acquire(blocking=False):
+    # `already_locked` is the HTTP path: the endpoint takes the lock so a second POST
+    # can 409 before the background task even starts. The scheduler still acquires here.
+    if not already_locked and not global_update_lock.acquire(blocking=False):
         logger.warning("Actualizacion global ya en curso. Omitiendo tarea.")
         return
 
@@ -262,7 +266,7 @@ def retire_one_shot_task(task_id: int) -> None:
 
 def job_wrapper(target: str, task_id: int | None = None, task_type: str = "cron") -> None:
     try:
-        _run_job(target)
+        _run_job(target, task_id=task_id)
     finally:
         # In a finally: a task that fired has fired, whatever the outcome. Leaving it
         # active on failure would make it misfire on every restart from then on.
@@ -270,13 +274,17 @@ def job_wrapper(target: str, task_id: int | None = None, task_type: str = "cron"
             retire_one_shot_task(task_id)
 
 
-def _run_job(target: str) -> None:
+def _run_job(target: str, task_id: int | None = None) -> None:
     if target == "GLOBAL":
         logger.info("Ejecutando tarea programada: GLOBAL")
         global_update_job()
         return
 
     sloc = LOG_LOCALE
+    # Set inside the try and retired in `finally` after `db.close()`: a `return` in the
+    # try never reaches code below this block, and retire_one_shot_task opens its own
+    # session (nesting that on the testing StaticPool is the same connection).
+    retire_id: int | None = None
     db = SessionLocal()
     try:
         logger.info("Ejecutando tarea programada: %s", target)
@@ -286,6 +294,8 @@ def _run_job(target: str) -> None:
                 "Omitiendo tarea programada %s: no existe en BD o la ruta no es un stack compose valido.",
                 target,
             )
+            # Same shape as a one-shot that has fired: the UI listed it as pending forever.
+            retire_id = task_id
             return
 
         # `excluded` means "never update this automatically", not "skip it in the global
@@ -314,12 +324,17 @@ def _run_job(target: str) -> None:
             if success
             else t("scheduler.scheduled_error", sloc, target=target)
         )
-        persist_update_log(
-            db,
-            status="SUCCESS" if success else "ERROR",
-            summary=summary,
-            details={target: logs},
-        )
+        try:
+            persist_update_log(
+                db,
+                status="SUCCESS" if success else "ERROR",
+                summary=summary,
+                details={target: logs},
+            )
+        except SQLAlchemyError:
+            # Same as the HTTP path: the stack has already been pulled and health-checked,
+            # so failing to write the row must not rewrite a working deploy as ERROR.
+            logger.error("No se pudo persistir el historial de %s.", target)
     except Exception as exc:
         logger.error("Error en tarea programada %s: %s", target, exc)
         try:
@@ -333,19 +348,23 @@ def _run_job(target: str) -> None:
             logger.error("No se pudo persistir log de error para %s: %s", target, log_exc)
     finally:
         db.close()
+        if retire_id is not None:
+            retire_one_shot_task(retire_id)
 
 
 def refresh_scheduler_jobs() -> None:
-    # Serialised: this drops every job before adding them back, and it is called from the
-    # request threads of create/delete. Two overlapping calls left a window with no jobs
-    # registered at all.
+    # Add missing jobs and drop retired ones. `remove_all_jobs()` plus re-add used to
+    # reset every CronTrigger's next fire: APScheduler's misfire grace is one second, so
+    # creating or deleting a schedule in the same minute as a daily job skipped that run
+    # with nothing on the UI. Rows are immutable after create, so an existing id is left
+    # alone.
     with _refresh_lock:
-        scheduler.remove_all_jobs()
-
         db = SessionLocal()
         count = 0
         pruned = 0
+        wanted: set[str] = set()
         try:
+            existing = {job.id for job in scheduler.get_jobs()}
             tasks = db.query(ScheduledTask).filter(ScheduledTask.active.is_(True)).all()
 
             for task in tasks:
@@ -363,17 +382,28 @@ def refresh_scheduler_jobs() -> None:
                     pruned += 1
                     continue
 
+                job_id = f"job_{task.id}"
+                if job_id in existing:
+                    wanted.add(job_id)
+                    count += 1
+                    continue
                 try:
                     scheduler.add_job(
                         job_wrapper,
                         trigger,
                         args=[task.target, task.id, task.task_type],
-                        id=f"job_{task.id}",
-                        replace_existing=True,
+                        id=job_id,
                     )
+                    wanted.add(job_id)
                     count += 1
                 except Exception as exc:
                     logger.error("Error cargando tarea %s: %s", task.id, exc)
+
+            for job_id in existing - wanted:
+                try:
+                    scheduler.remove_job(job_id)
+                except Exception:
+                    logger.warning("No se pudo retirar el job %s.", job_id)
 
             if pruned:
                 try:

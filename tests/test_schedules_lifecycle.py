@@ -258,3 +258,137 @@ def test_a_scheduled_task_still_runs_for_a_project_that_is_not_excluded(
     assert called == ["pihole"]
     with session_scope() as db:
         assert db.query(UpdateLog).count() == 1
+
+
+def test_refresh_does_not_reset_next_run_time_of_an_existing_job(
+    client: TestClient,
+) -> None:
+    """Creating another schedule used to drop every job and re-add them.
+
+    APScheduler's misfire grace is one second, so a refresh in the same minute as a daily
+    job skipped that run with nothing on the UI.
+    """
+    from server.services.scheduler import refresh_scheduler_jobs, scheduler
+
+    first = client.post(
+        "/api/schedules",
+        json={
+            "target": "GLOBAL",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 4,
+            "minute": 0,
+        },
+    )
+    assert first.status_code == 200, first.text
+    job_id = f"job_{first.json()['id']}"
+    before = scheduler.get_job(job_id).next_run_time
+    assert before is not None
+
+    second = client.post(
+        "/api/schedules",
+        json={
+            "target": "GLOBAL",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 5,
+            "minute": 0,
+        },
+    )
+    assert second.status_code == 200, second.text
+    assert scheduler.get_job(job_id).next_run_time == before
+
+    refresh_scheduler_jobs()
+    assert scheduler.get_job(job_id).next_run_time == before
+
+
+def test_refresh_removes_only_the_deleted_job(client: TestClient) -> None:
+    from server.services.scheduler import scheduler
+
+    first = client.post(
+        "/api/schedules",
+        json={
+            "target": "GLOBAL",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 4,
+            "minute": 0,
+        },
+    )
+    second = client.post(
+        "/api/schedules",
+        json={
+            "target": "GLOBAL",
+            "task_type": "cron",
+            "frequency": "daily",
+            "hour": 5,
+            "minute": 0,
+        },
+    )
+    assert first.status_code == 200 and second.status_code == 200
+    id_a = first.json()["id"]
+    id_b = second.json()["id"]
+    next_b = scheduler.get_job(f"job_{id_b}").next_run_time
+
+    assert client.delete(f"/api/schedules/{id_a}").status_code == 200
+
+    assert scheduler.get_job(f"job_{id_a}") is None
+    leftover = scheduler.get_job(f"job_{id_b}")
+    assert leftover is not None
+    assert leftover.next_run_time == next_b
+
+
+def test_a_persist_failure_does_not_write_an_error_row(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """SQLite failing after a working deploy used to record that deploy as ERROR."""
+    import server.services.scheduler as scheduler_module
+    from sqlalchemy.exc import SQLAlchemyError
+
+    stack = tmp_path / "pihole"
+    stack.mkdir()
+    (stack / "docker-compose.yml").write_text("services: {}\n")
+
+    with session_scope() as db:
+        db.add(ProjectSettings(name="pihole", path=str(stack), excluded=False))
+        db.commit()
+
+    monkeypatch.setattr(scheduler_module, "compose_stack_allowed", lambda _path: True)
+    monkeypatch.setattr(
+        scheduler_module,
+        "update_single_project_logic",
+        lambda name, db, *, locale="es": (True, ["done"]),
+    )
+
+    def _boom(*_args, **_kwargs):
+        raise SQLAlchemyError("disk full")
+
+    monkeypatch.setattr(scheduler_module, "persist_update_log", _boom)
+
+    scheduler_module._run_job("pihole")
+
+    with session_scope() as db:
+        assert db.query(UpdateLog).filter(UpdateLog.status == "ERROR").count() == 0
+        assert db.query(UpdateLog).count() == 0
+
+
+def test_a_job_for_a_missing_project_retires_its_schedule() -> None:
+    import server.services.scheduler as scheduler_module
+
+    with session_scope() as db:
+        row = ScheduledTask(
+            target="ghost",
+            task_type="cron",
+            expression="0 4 * * *",
+            active=True,
+        )
+        db.add(row)
+        db.commit()
+        task_id = row.id
+
+    scheduler_module._run_job("ghost", task_id=task_id)
+
+    with session_scope() as db:
+        leftover = db.get(ScheduledTask, task_id)
+        assert leftover is not None
+        assert leftover.active is False

@@ -40,8 +40,10 @@ def _create_schema():
 def _clean_database_state():
     """Every test starts and ends against empty tables."""
     _truncate()
+    _reset_scheduler_runtime()
     yield
     _truncate()
+    _reset_scheduler_runtime()
     auth_state.reset_for_tests()
     login_rate_limit.reset_for_tests()
     # Both are process-global and now outlive a request: the per-project update runs as a
@@ -80,6 +82,25 @@ def _truncate() -> None:
         for model in _MUTABLE_TABLES:
             db.query(model).delete()
         db.commit()
+
+
+def _reset_scheduler_runtime() -> None:
+    """Jobs and the global lock outlive the in-memory tables.
+
+    `refresh_scheduler_jobs` now keeps an existing APScheduler id, so a leftover `job_1`
+    from the previous test would be treated as the new row after SQLite reused the id.
+    """
+    from server.services.scheduler import global_update_lock, scheduler
+
+    try:
+        scheduler.remove_all_jobs()
+    except Exception:
+        pass
+    if global_update_lock.locked():
+        try:
+            global_update_lock.release()
+        except RuntimeError:
+            pass
 
 
 @pytest.fixture()
