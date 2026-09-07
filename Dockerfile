@@ -15,7 +15,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # Keep this version in step with .python-version (pyenv) at the repo root.
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Unbuffered so `docker logs` shows what happened as it happens rather than when the pipe
 # fills; no .pyc files because the code is installed once and never re-imported cold.
