@@ -7,6 +7,12 @@ on:
 # No default permissions at workflow level: each job asks only for what it needs.
 permissions: {}
 
+# Never cancelled mid-flight: a half-pushed multi-arch manifest is worse than a duplicate
+# run, so releases queue instead of superseding each other.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   build-and-push:
     if: ${{ !github.event.release.prerelease }}
