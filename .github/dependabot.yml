@@ -1,15 +1,28 @@
 # Group instead of piling up. `open-pull-requests-limit` applies ONLY to version updates:
 # security updates are unlimited and open one PR per dependency unless a group with
 # `applies-to: security-updates` exists. That is how 19 PRs once accumulated.
+#
+# Few PRs, none of them surprising:
+#   - Version updates run monthly, one grouped PR per ecosystem, minor and patch only.
+#   - Security updates open as soon as an advisory lands, one grouped PR per ecosystem.
+#   - Majors never arrive as a routine PR: a major group only produced PRs that sat open
+#     for weeks. The monthly `Security audit` workflow keeps them listed in the
+#     "Pending major updates" issue, to be planned as migrations.
 version: 2
 
 updates:
-  # GitHub Actions
+  # GitHub Actions. Pinned by SHA; Dependabot moves the SHA and its version comment
+  # together. Majors stay in the group: CI exercises the actions it uses, and actionlint
+  # checks the inputs of the release-only ones (QEMU, login, metadata).
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "monthly"
+      time: "06:00"
+      timezone: "Europe/Madrid"
     open-pull-requests-limit: 3
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "ci(deps)"
     labels:
@@ -29,8 +42,7 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "06:00"
       timezone: "Europe/Madrid"
     open-pull-requests-limit: 5
@@ -42,6 +54,10 @@ updates:
     labels:
       - "dependencies"
       - "python"
+    # Applies to version updates only: a security major still opens a PR.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-security:
         applies-to: security-updates
@@ -54,12 +70,6 @@ updates:
           - "minor"
         patterns:
           - "*"
-      python-major:
-        applies-to: version-updates
-        update-types:
-          - "major"
-        patterns:
-          - "*"
 
   # Frontend (web/). The ecosystem is still called "npm" — it covers pnpm too, reading
   # web/pnpm-lock.yaml. Dependabot supports pnpm v7-v10, which is why `packageManager` is
@@ -67,8 +77,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "06:00"
       timezone: "Europe/Madrid"
     open-pull-requests-limit: 5
@@ -82,18 +91,11 @@ updates:
     labels:
       - "dependencies"
       - "javascript"
-    # Frozen on purpose: react 19 and tailwind 4 are migrations, not updates. Security
-    # advisories ignore this list, so a CVE still opens a PR.
+    # Every major is a migration, not an update: react 19 and tailwind 4 were the first
+    # ones frozen here, jsdom 30 and vitest 5 are the latest. Security advisories ignore
+    # this list, so a CVE still opens a PR.
     ignore:
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "tailwindcss"
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     groups:
       npm-security:
@@ -107,31 +109,26 @@ updates:
           - "minor"
         patterns:
           - "*"
-      npm-major:
-        applies-to: version-updates
-        update-types:
-          - "major"
-        patterns:
-          - "*"
 
   # Dockerfile base images, so base-image CVEs do not go unnoticed.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "monthly"
+      time: "06:00"
+      timezone: "Europe/Madrid"
     open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(docker)"
     labels:
       - "dependencies"
-    # Same criterion: node 25 dropped corepack and odd majors are not LTS; python has to
-    # stay in step with .python-version; docker is the CLI copied into the image.
+    # Same criterion for every image: node 25 dropped corepack and odd majors are not LTS;
+    # python has to stay in step with .python-version; docker is the CLI copied into the
+    # image.
     ignore:
-      - dependency-name: "node"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "python"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "docker"
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
     groups:
       docker-security:
