@@ -20,6 +20,12 @@ concurrency:
   # one was never validated at all. Superseded PR runs are still fair game to cancel.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Pinned: the validator used to be fetched from actionlint's `main` branch and pip's latest,
+# so the gate could change under a commit that changed nothing.
+env:
+  ACTIONLINT_VERSION: "1.7.12"
+  CHECK_JSONSCHEMA_VERSION: "0.38.0"
+
 jobs:
   ci:
     name: CI
@@ -27,7 +33,7 @@ jobs:
     # A hung Docker build would otherwise burn the 6h default.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -36,15 +42,17 @@ jobs:
       - name: Validate workflows and Dependabot config
         run: |
           set -euo pipefail
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          curl -sSfL \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            | tar xz actionlint
           ./actionlint -color .github/workflows/*.yml
           rm -f ./actionlint
-          python -m pip install --quiet check-jsonschema
+          python -m pip install --quiet "check-jsonschema==${CHECK_JSONSCHEMA_VERSION}"
           check-jsonschema --schemafile https://json.schemastore.org/dependabot-2.0.json \
             .github/dependabot.yml
 
       # 3.11 only: what .python-version pins and what the image ships.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -66,11 +74,11 @@ jobs:
 
       # No `version:`: the action reads `packageManager` from web/package.json.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: web/package.json
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: pnpm
@@ -92,11 +100,11 @@ jobs:
         working-directory: web
         run: pnpm run build
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Single platform: only checks the build compiles. Multi-arch is in ghcr-publish.yml.
       - name: Build image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ./Dockerfile
