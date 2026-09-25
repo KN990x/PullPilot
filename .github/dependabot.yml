@@ -20,20 +20,15 @@ updates:
       interval: "monthly"
       time: "06:00"
       timezone: "Europe/Madrid"
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 5
     cooldown:
       default-days: 7
-    commit-message:
-      prefix: "ci(deps)"
-    labels:
-      - "dependencies"
-      - "github_actions"
     groups:
       actions-security:
         applies-to: security-updates
         patterns:
           - "*"
-      actions-all:
+      actions:
         applies-to: version-updates
         patterns:
           - "*"
@@ -49,11 +44,6 @@ updates:
     # Leaves room for a bad release to be yanked. Not applied to security updates.
     cooldown:
       default-days: 7
-    commit-message:
-      prefix: "chore(deps)"
-    labels:
-      - "dependencies"
-      - "python"
     # Applies to version updates only: a security major still opens a PR.
     ignore:
       - dependency-name: "*"
@@ -63,7 +53,7 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
-      python-patch-minor:
+      python:
         applies-to: version-updates
         update-types:
           - "patch"
@@ -86,11 +76,6 @@ updates:
     # `^` ranges: only touch package.json when the range no longer admits the version.
     # The default (`increase`) rewrites the manifest on every patch.
     versioning-strategy: increase-if-necessary
-    commit-message:
-      prefix: "chore(deps)"
-    labels:
-      - "dependencies"
-      - "javascript"
     # Every major is a migration, not an update: react 19 and tailwind 4 were the first
     # ones frozen here, jsdom 30 and vitest 5 are the latest. Security advisories ignore
     # this list, so a CVE still opens a PR.
@@ -102,7 +87,7 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
-      npm-patch-minor:
+      npm:
         applies-to: version-updates
         update-types:
           - "patch"
@@ -117,13 +102,9 @@ updates:
       interval: "monthly"
       time: "06:00"
       timezone: "Europe/Madrid"
-    open-pull-requests-limit: 2
+    open-pull-requests-limit: 5
     cooldown:
       default-days: 7
-    commit-message:
-      prefix: "chore(docker)"
-    labels:
-      - "dependencies"
     # Same criterion for every image: node 25 dropped corepack and odd majors are not LTS;
     # python has to stay in step with .python-version; docker is the CLI copied into the
     # image.
@@ -135,7 +116,7 @@ updates:
         applies-to: security-updates
         patterns:
           - "*"
-      docker-all:
+      docker:
         applies-to: version-updates
         patterns:
           - "*"
