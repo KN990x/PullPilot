@@ -43,10 +43,6 @@ server/data/
 pullpilot.db
 session_secret.key
 
-# Local agent instructions, not part of the project
-AGENTS.md
-CLAUDE.md
-
 # Editors and OS
 .DS_Store
 .vscode/
