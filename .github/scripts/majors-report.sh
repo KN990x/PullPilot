@@ -26,12 +26,16 @@ majors=""
 held_rows=""
 
 for dir in $PNPM_DIRS; do
-  # `pnpm outdated` exits 1 whenever something is outdated, which is the normal case here.
-  # It also prints warnings (engines, …) on stdout ahead of the JSON, hence the sed.
-  # An empty or non-JSON answer is a real failure and must not produce an empty report.
+  # `pnpm outdated` exits 1 whenever something is outdated, which is the normal case here,
+  # and prints `{}` when nothing is. It also prints warnings (engines, …) on stdout ahead
+  # of the JSON, hence the sed. No JSON at all means it failed (a wrong Node for
+  # `engineStrict`, say): that must fail the job, not publish "Nothing pending".
   out="$(cd "$dir" && pnpm outdated --recursive --format json 2>/dev/null | sed -n '/^{/,$p')" || true
-  [ -n "$out" ] || out="{}"
-  echo "$out" | jq -e 'type == "object"' >/dev/null
+  if ! echo "$out" | jq -e 'type == "object"' >/dev/null 2>&1; then
+    echo "pnpm outdated produced no report in $dir:" >&2
+    (cd "$dir" && pnpm outdated --recursive --format json) >&2 || true
+    exit 1
+  fi
 
   rows="$(echo "$out" | jq -r --arg dir "$dir" --argjson held "$held_json" '
     def parts: split("-")[0] | split(".") | map(tonumber? // 0);
