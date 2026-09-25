@@ -21,8 +21,12 @@ updates:
       time: "06:00"
       timezone: "Europe/Madrid"
     open-pull-requests-limit: 5
+    # Our own shared workflows (KN990x/.github) skip the cooldown: it guards against a
+    # malicious third-party publish, not against a release we tagged ourselves.
     cooldown:
       default-days: 7
+      exclude:
+        - "KN990x/*"
     groups:
       actions-security:
         applies-to: security-updates

@@ -19,12 +19,6 @@ concurrency:
   # one was never validated at all. Superseded PR runs are still fair game to cancel.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Pinned: the validator used to be fetched from actionlint's `main` branch and pip's latest,
-# so the gate could change under a commit that changed nothing.
-env:
-  ACTIONLINT_VERSION: "1.7.12"
-  CHECK_JSONSCHEMA_VERSION: "0.38.0"
-
 jobs:
   ci:
     name: CI
@@ -37,18 +31,10 @@ jobs:
           persist-credentials: false
 
       # The one file whose breakage is silent: an invalid dependabot.yml disables
-      # Dependabot entirely, with no error anywhere. Nothing checked it before.
+      # Dependabot entirely, with no error anywhere. The check is shared by every KN990x
+      # repository (KN990x/.github), pinned like any other action.
       - name: Validate workflows and Dependabot config
-        run: |
-          set -euo pipefail
-          curl -sSfL \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            | tar xz actionlint
-          ./actionlint -color .github/workflows/*.yml
-          rm -f ./actionlint
-          python -m pip install --quiet "check-jsonschema==${CHECK_JSONSCHEMA_VERSION}"
-          check-jsonschema --schemafile https://json.schemastore.org/dependabot-2.0.json \
-            .github/dependabot.yml
+        uses: KN990x/.github/actions/validate-config@716c418539e8af359ae2916399a155b9d00d11c5 # v1.0.0
 
       # 3.11 only: what .python-version pins and what the image ships.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -113,54 +99,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Shared with the release workflow, which also boots the arm64 image with it. The
+      # script removes its own container on exit.
       - name: Smoke test (cold start + setup wizard)
-        run: |
-          # No auth variables at all: exactly the cold start a new user gets.
-          docker run -d --name pullpilot-ci -p 8000:8000 pullpilot:ci
-
-          for _ in $(seq 1 30); do
-            if curl -fsS -o /tmp/status.json http://127.0.0.1:8000/api/auth/status; then
-              break
-            fi
-            sleep 2
-          done
-          if ! [ -s /tmp/status.json ]; then
-            echo "::error::Container did not respond within 60s"
-            docker logs pullpilot-ci
-            exit 1
-          fi
-          echo "auth status: $(cat /tmp/status.json)"
-          grep -q '"setup_complete":false' /tmp/status.json
-
-          # The API stays closed until the wizard is done.
-          code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/projects)
-          [ "$code" = "401" ] || { echo "::error::/api/projects should be 401, got $code"; exit 1; }
-
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H 'Content-Type: application/json' \
-            -d '{"username":"ciadmin","password":"ci-only-password","password_confirm":"ci-only-password"}' \
-            -c /tmp/cookies.txt http://127.0.0.1:8000/api/auth/setup)
-          [ "$code" = "201" ] || { echo "::error::setup should be 201, got $code"; docker logs pullpilot-ci; exit 1; }
-
-          code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/api/projects)
-          [ "$code" = "200" ] || { echo "::error::/api/projects with session should be 200, got $code"; exit 1; }
-
-          # The SPA fallback must not swallow API 404s: it used to return index.html with
-          # status 200 and the UI took the delete as done.
-          code=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
-            -b /tmp/cookies.txt http://127.0.0.1:8000/api/schedules/99999)
-          [ "$code" = "404" ] || { echo "::error::/api/schedules/99999 should be 404, got $code"; exit 1; }
-
-          # ...but a navigation route does have to get the SPA shell.
-          code=$(curl -s -o /dev/null -w "%{http_code}" -b /tmp/cookies.txt http://127.0.0.1:8000/history)
-          [ "$code" = "200" ] || { echo "::error::/history should serve the SPA shell, got $code"; exit 1; }
-
-          # docker compose has to exist in the image: it runs every update, and now comes
-          # from the official CLI rather than the docker.io package.
-          docker exec pullpilot-ci docker compose version
-
-          echo "Cold start, setup wizard, authenticated request and 404 handling all OK"
-
-      - name: Cleanup
-        if: always()
-        run: docker rm -f pullpilot-ci || true
+        run: bash .github/scripts/smoke-test.sh pullpilot:ci pullpilot-ci

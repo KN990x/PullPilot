@@ -151,8 +151,7 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Rewrite the "Pending major updates" issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PNPM_DIRS: web
-          PIP_PROJECT: "."
-        run: bash .github/scripts/majors-report.sh
+        uses: KN990x/.github/actions/majors-report@716c418539e8af359ae2916399a155b9d00d11c5 # v1.0.0
+        with:
+          pnpm-dirs: web
+          pip-project: "."
