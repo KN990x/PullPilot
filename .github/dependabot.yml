@@ -95,7 +95,8 @@ updates:
         patterns:
           - "*"
 
-  # Dockerfile base images, so base-image CVEs do not go unnoticed.
+  # Dockerfile base images, so base-image CVEs do not go unnoticed. The Dockerfile pins
+  # tag + digest: patches to the same line arrive here as a new digest in the monthly group.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:

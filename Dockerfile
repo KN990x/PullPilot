@@ -1,4 +1,8 @@
-FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend-builder
+# Base images are pinned by digest as well as tag. The tag says which line (Node 24,
+# Python 3.11); the digest says which build of it, so one commit always builds from the
+# same bytes, and base-image patches arrive as the monthly Dependabot `docker` PR
+# instead of silently on the next build.
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS frontend-builder
 
 # corepack installs exactly the pnpm from `packageManager`, so image, CI and local
 # development agree. Node 25 dropped corepack — see the pins in .github/dependabot.yml.
@@ -15,7 +19,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # Keep this version in step with .python-version (pyenv) at the repo root.
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88740aed1b95ba9
 
 # Unbuffered so `docker logs` shows what happened as it happens rather than when the pipe
 # fills; no .pyc files because the code is installed once and never re-imported cold.
@@ -33,8 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Caveat worth knowing: Dependabot's Docker updater parses `FROM` directives, and this is
 # a `COPY --from`. Do not assume the pin below is being watched — check it by hand when
 # reviewing the ignore rule for `docker` in .github/dependabot.yml.
-COPY --from=docker:28-cli /usr/local/bin/docker /usr/local/bin/docker
-COPY --from=docker:28-cli /usr/local/libexec/docker/cli-plugins/docker-compose \
+COPY --from=docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d /usr/local/libexec/docker/cli-plugins/docker-compose \
      /usr/local/libexec/docker/cli-plugins/docker-compose
 
 # Build in a scratch directory and throw it away, so the only surviving copy of the code
