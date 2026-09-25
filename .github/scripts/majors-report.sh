@@ -12,6 +12,7 @@
 #                project must already be installed in the active interpreter)
 #   HELD         space-separated package globs that dependabot.yml holds back entirely;
 #                they are listed whenever any newer version exists, not only a major
+#   RUNTIME_ROOT directory with .nvmrc / .python-version / Dockerfile (default ".")
 #   DRY_RUN=1    print the report instead of touching the issue
 set -euo pipefail
 
@@ -87,6 +88,82 @@ PY
   [ -z "$majors" ] || majors="${majors%$'\n'}"$'\n'
 fi
 
+# Node, Python and base images are not dependencies Dependabot can move: a Node or Python
+# upgrade is a migration of the version file, `engines`, the Dockerfile and CI at once. This
+# compares what the repo pins against endoflife.date, so the upgrade shows up here — and so
+# does a runtime that has quietly gone out of support.
+runtime_report() {
+  python3 - "${RUNTIME_ROOT:-.}" <<'PY'
+import datetime, json, os, re, sys, urllib.request
+
+root = sys.argv[1]
+products = {"node": "nodejs", "python": "python", "docker": "docker-engine"}
+today = datetime.date.today().isoformat()
+cache = {}
+
+def cycles(product):
+    if product not in cache:
+        try:
+            with urllib.request.urlopen(f"https://endoflife.date/api/{product}.json", timeout=20) as r:
+                cache[product] = json.load(r)
+        except Exception:
+            cache[product] = None
+    return cache[product]
+
+def key(cycle):
+    return tuple(int(p) for p in re.findall(r"\d+", cycle))
+
+def cycle_of(runtime, version):
+    parts = re.findall(r"\d+", version)
+    if not parts:
+        return None
+    return ".".join(parts[:2]) if runtime == "python" else parts[0]
+
+found = []  # (runtime, source, cycle)
+for name, runtime in ((".nvmrc", "node"), (".python-version", "python")):
+    path = os.path.join(root, name)
+    if os.path.exists(path):
+        cycle = cycle_of(runtime, open(path).read().strip())
+        if cycle:
+            found.append((runtime, name, cycle))
+dockerfile = os.path.join(root, "Dockerfile")
+if os.path.exists(dockerfile):
+    for line in open(dockerfile):
+        m = re.match(r"\s*(?:FROM(?:\s+--platform=\S+)?|COPY\s+--from=)\s*(\S+)", line, re.I)
+        if not m or ":" not in m.group(1):
+            continue
+        image, tag = m.group(1).split("@")[0].rsplit(":", 1)
+        runtime = image.split("/")[-1]
+        if runtime in products:
+            cycle = cycle_of(runtime, tag)
+            row = (runtime, f"Dockerfile ({image}:{tag})", cycle)
+            if cycle and row not in found:  # one row per image, however many stages use it
+                found.append(row)
+
+if not found:
+    print("No version file or base image to check.")
+    sys.exit(0)
+
+print("| Runtime | Pinned in | In use | Newest | Support for the one in use ends |")
+print("| --- | --- | --- | --- | --- |")
+for runtime, source, cycle in found:
+    data = cycles(products[runtime])
+    if data is None:
+        print(f"| {runtime} | {source} | {cycle} | could not reach endoflife.date | |")
+        continue
+    # Node's "newest" is the newest LTS already in LTS; odd and pre-LTS lines are not
+    # upgrade targets for a server. Python and Docker: the newest released cycle.
+    candidates = [c for c in data if runtime != "node" or (c.get("lts") and str(c["lts"]) <= today)]
+    newest = max((c["cycle"] for c in candidates), key=key, default=cycle)
+    mine = next((c for c in data if c["cycle"] == cycle), None)
+    eol = str(mine["eol"]) if mine and mine.get("eol") not in (None, False) else "not announced"
+    if eol != "not announced" and eol <= today:
+        eol = f"**{eol} — out of support**"
+    shown = f"**{newest}**" if key(newest) > key(cycle) else f"{newest} (current)"
+    print(f"| {runtime} | {source} | {cycle} | {shown} | {eol} |")
+PY
+}
+
 header=$'| Package | Current | Latest | Type | Used by |\n| --- | --- | --- | --- | --- |'
 body="Dependabot does not open major updates here: each one is a migration to plan, not a
 routine bump. This issue is rewritten every month by the \`Security audit\` workflow, so
@@ -97,7 +174,8 @@ if [ -n "$HELD" ]; then
   body+=$'\n'"## Held back in dependabot.yml"$'\n\n'"Updated by hand, together: \`$HELD\`."$'\n\n'
   if [ -n "$held_rows" ]; then body+="$header"$'\n'"$held_rows"; else body+="All current."$'\n'; fi
 fi
-body+=$'\n'"The runtime itself (Node, Python) is not listed: it moves by hand, together with its version file, \`engines\` and any base image."$'\n\n'
+body+=$'\n'"## Runtimes"$'\n\n'"$(runtime_report)"$'\n\n'
+body+="A runtime moves by hand, together: its version file, \`engines\`, the base image and CI (which reads the version file)."$'\n\n'
 body+="_Checked on $(date -u +%Y-%m-%d)._"$'\n'
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
