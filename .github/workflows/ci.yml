@@ -34,7 +34,7 @@ jobs:
       # Dependabot entirely, with no error anywhere. The check is shared by every KN990x
       # repository (KN990x/.github), pinned like any other action.
       - name: Validate workflows and Dependabot config
-        uses: KN990x/.github/actions/validate-config@862ceef5b74c00a2debbb766b3aa4b3721af7e8c # v1.1.0
+        uses: KN990x/.github/actions/validate-config@b2da4cea2a7c25bffb9f09520621be55ebd0c4a6 # v1.2.0
 
       # 3.11 only: what .python-version pins and what the image ships.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

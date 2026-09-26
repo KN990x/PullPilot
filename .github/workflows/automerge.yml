@@ -1,8 +1,11 @@
-# Merges routine Dependabot PRs once CI has passed on them. The rules live in KN990x/.github
-# (dependabot-merge.yml): no majors, dependency files only, nothing pushed on top; anything
-# else waits for a human. CI runs again on main after every merge.
+# Merges a Dependabot PR once it has a green CI run AND Timón's approval (or KN's) on its
+# current head. Timón reviews the dependency PRs monthly and the security PRs weekly,
+# researching each update before approving. The fixed rules live in KN990x/.github
+# (dependabot-merge.yml): no majors, dependency files only, nothing pushed on top — an
+# approval never overrides them. CI runs again on main after every merge.
 # Off switch for this repository: Actions variable DEPENDABOT_AUTOMERGE=off. For one PR:
-# the `no-automerge` label.
+# the `no-automerge` label. Who may approve: Actions variable AUTOMERGE_APPROVERS
+# (space-separated logins; empty means the repository owner).
 name: Dependabot automerge
 
 on:
@@ -10,14 +13,27 @@ on:
     workflows: [CI]
     types: [completed]
     branches: ["dependabot/**"]
+  pull_request_review:
+    types: [submitted]
 
 permissions: {}
 
+# CI finishing and the approval arriving can race; one decision per PR at a time.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
 jobs:
   merge:
-    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPENDABOT_AUTOMERGE != 'off' }}
+    if: >-
+      ${{ vars.DEPENDABOT_AUTOMERGE != 'off' && (
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+        (github.event_name == 'pull_request_review' && github.event.review.state == 'approved' &&
+         startsWith(github.event.pull_request.head.ref, 'dependabot/'))) }}
     permissions:
       contents: write # merge
       pull-requests: write # merge and delete the branch
       actions: write # re-run CI on main after the merge
-    uses: KN990x/.github/.github/workflows/dependabot-merge.yml@862ceef5b74c00a2debbb766b3aa4b3721af7e8c # v1.1.0
+    uses: KN990x/.github/.github/workflows/dependabot-merge.yml@b2da4cea2a7c25bffb9f09520621be55ebd0c4a6 # v1.2.0
+    with:
+      approvers: ${{ vars.AUTOMERGE_APPROVERS }}
