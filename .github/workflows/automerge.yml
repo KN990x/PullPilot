@@ -1,0 +1,23 @@
+# Merges routine Dependabot PRs once CI has passed on them. The rules live in KN990x/.github
+# (dependabot-merge.yml): no majors, dependency files only, nothing pushed on top; anything
+# else waits for a human. CI runs again on main after every merge.
+# Off switch for this repository: Actions variable DEPENDABOT_AUTOMERGE=off. For one PR:
+# the `no-automerge` label.
+name: Dependabot automerge
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: ["dependabot/**"]
+
+permissions: {}
+
+jobs:
+  merge:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.DEPENDABOT_AUTOMERGE != 'off' }}
+    permissions:
+      contents: write # merge
+      pull-requests: write # merge and delete the branch
+      actions: write # re-run CI on main after the merge
+    uses: KN990x/.github/.github/workflows/dependabot-merge.yml@862ceef5b74c00a2debbb766b3aa4b3721af7e8c # v1.1.0

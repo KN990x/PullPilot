@@ -151,7 +151,7 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Rewrite the "Pending major updates" issue
-        uses: KN990x/.github/actions/majors-report@716c418539e8af359ae2916399a155b9d00d11c5 # v1.0.0
+        uses: KN990x/.github/actions/majors-report@862ceef5b74c00a2debbb766b3aa4b3721af7e8c # v1.1.0
         with:
           pnpm-dirs: web
           pip-project: "."
