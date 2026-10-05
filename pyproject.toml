@@ -12,7 +12,7 @@ dependencies = [
   # Pinned on its own because server/app.py imports starlette.middleware.sessions
   # directly. FastAPI declares its own compatible range, so bump the two together —
   # two independent Dependabot PRs can otherwise land an unresolvable pair.
-  "starlette==1.6.0",
+  "starlette==1.7.0",
   "uvicorn==0.53.0",
   "pydantic==2.13.5",
   "sqlalchemy==2.0.54",
