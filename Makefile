@@ -8,7 +8,7 @@ PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 # `corepack pnpm` resolves the version pinned by `packageManager` in web/package.json.
 PNPM ?= corepack pnpm
 
-.PHONY: dev dev-server dev-web setup setup-web build up lint test
+.PHONY: dev dev-server dev-web setup setup-web build up lint test check
 
 setup:
 	pyenv install -s "$$(cat .python-version)"
@@ -49,3 +49,6 @@ lint:
 # Both suites, because a contract change touches server/routers and web/src/lib/api.js.
 test:
 	$(PY) -m pytest tests/ && cd web && $(PNPM) run test
+
+# The full local gate before a commit: lint (which builds the frontend) and both suites.
+check: lint test
