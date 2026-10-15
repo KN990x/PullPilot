@@ -34,6 +34,6 @@ jobs:
       contents: write # merge
       pull-requests: write # merge and delete the branch
       actions: write # re-run CI on main after the merge
-    uses: KN990x/.github/.github/workflows/dependabot-merge.yml@b2da4cea2a7c25bffb9f09520621be55ebd0c4a6 # v1.2.0
+    uses: KN990x/.github/.github/workflows/dependabot-merge.yml@c859a5362f488cdc045747c8f44a03ad91aa6bd9 # v1.2.2
     with:
       approvers: ${{ vars.AUTOMERGE_APPROVERS }}
