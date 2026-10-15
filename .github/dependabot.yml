@@ -66,8 +66,7 @@ updates:
           - "*"
 
   # Frontend (web/). The ecosystem is still called "npm" — it covers pnpm too, reading
-  # web/pnpm-lock.yaml. Dependabot supports pnpm v7-v10, which is why `packageManager` is
-  # pinned to 10.x: v11 would produce a lockfile it may not know how to update.
+  # web/pnpm-lock.yaml (pnpm 11 writes the same lockfile format; vuzon and Glassys run it).
   - package-ecosystem: "npm"
     directory: "/web"
     schedule:

@@ -13,3 +13,11 @@ allowBuilds:
 # Deliberately aligned with `cooldown: default-days: 7` in .github/dependabot.yml.
 # It does not affect `--frozen-lockfile`, so CI and Docker stay deterministic.
 minimumReleaseAge: 10080
+
+# Moved here from .npmrc: pnpm 11 only reads auth settings from .npmrc.
+# Fail instead of silently installing when the lockfile and package.json disagree. CI already
+# does this by default; this extends it to local environments.
+preferFrozenLockfile: true
+
+# Peer dependency warnings should not break the install.
+strictPeerDependencies: false

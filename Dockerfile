@@ -11,7 +11,7 @@ RUN corepack enable
 WORKDIR /app-web
 
 # Manifests first so the dependency layer survives source changes.
-COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 
 RUN pnpm install --frozen-lockfile
 
