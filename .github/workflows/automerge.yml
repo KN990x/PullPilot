@@ -1,8 +1,7 @@
-# Merges a Dependabot PR once it has a green CI run AND Timón's approval (or KN's) on its
-# current head. Timón reviews the dependency PRs monthly and the security PRs weekly,
-# researching each update before approving. The fixed rules live in KN990x/.github
-# (dependabot-merge.yml): no majors, dependency files only, nothing pushed on top — an
-# approval never overrides them. CI runs again on main after every merge.
+# Merges a Dependabot PR once it has a green CI run AND an approval from an authorised
+# reviewer (AUTOMERGE_APPROVERS, the owner by default) on its current head. The fixed
+# rules live in KN990x/.github (dependabot-merge.yml): no majors, dependency files only,
+# nothing pushed on top — an approval never overrides them. CI runs again on main after every merge.
 # Off switch for this repository: Actions variable DEPENDABOT_AUTOMERGE=off. For one PR:
 # the `no-automerge` label. Who may approve: Actions variable AUTOMERGE_APPROVERS
 # (space-separated logins; empty means the repository owner).
