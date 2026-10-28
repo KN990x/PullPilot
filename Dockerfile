@@ -1,12 +1,13 @@
-# Base images are pinned by digest as well as tag. The tag says which line (Node 24,
+# Base images are pinned by digest as well as tag. The tag says which line (Node 26,
 # Python 3.11); the digest says which build of it, so one commit always builds from the
 # same bytes, and base-image patches arrive as the monthly Dependabot `docker` PR
 # instead of silently on the next build.
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS frontend-builder
 
 # corepack installs exactly the pnpm from `packageManager`, so image, CI and local
-# development agree. Node 25 dropped corepack — see the pins in .github/dependabot.yml.
-RUN corepack enable
+# development agree. Node 25+ images no longer ship corepack, so it is installed first
+# (pinned, like everything else in the build).
+RUN npm install -g corepack@0.36.0 && corepack enable
 
 WORKDIR /app-web
 

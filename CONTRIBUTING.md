@@ -62,7 +62,8 @@ wizard from scratch.
 ### Frontend
 
 ```bash
-corepack enable        # once per machine
+npm install -g corepack # once per machine: Node 25+ no longer ships it (.nvmrc: Node 26)
+corepack enable         # once per machine
 cd web
 pnpm install --frozen-lockfile
 pnpm run dev
