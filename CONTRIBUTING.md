@@ -9,7 +9,7 @@ You can open issues for bugs or ideas, and pull requests for fixes or features.
 - **[pyenv](https://github.com/pyenv/pyenv)** to get the Python version pinned in
   `.python-version` (3.11.15 — the same line as the published `python:3.11-slim` image).
   Any Python 3.11+ works, but pyenv is what CI parity assumes.
-- **Node.js** 22.12 or newer, and **pnpm** for the frontend in `web/`. Do not use npm or
+- **Node.js** 26 or newer (the line in `.nvmrc`), and **pnpm** for the frontend in `web/`. Do not use npm or
   Yarn: the lockfile is `web/pnpm-lock.yaml`.
 - **Docker** and **Docker Compose** (optional but useful to validate the production image or real compose workflows).
 
@@ -134,8 +134,8 @@ The default `IMAGE_NAME` targets the GHCR-published image; override if needed: `
 
 1. Branch from `main` with a descriptive name.
 2. Use clear commit messages.
-3. **Run `make lint` and `make test` before opening the PR.** There is a single CI check
-   and it mirrors exactly those two commands plus a Docker build and a cold-start smoke
+3. **Run `make check` (`make lint` + `make test`) before opening the PR.** There is a single
+   CI check and it mirrors exactly those two commands plus a Docker build and a cold-start smoke
    test. Getting it green in CI and not locally means a slower loop, not a safer one.
 4. In the PR, explain **what** changed and **why**; link related issues when applicable.
 5. Docker or Compose changes should be reviewed together with `Dockerfile`, `.dockerignore`, or `docker-compose.yml` when relevant.
@@ -146,4 +146,4 @@ The `.github/workflows/ghcr-publish.yml` workflow builds and pushes the image to
 
 ---
 
-If anything here does not match your setup or is missing detail, open an issue and we can refine it in the repository.
+If anything here does not match your setup or is missing detail, open an issue and I will refine it in the repository.
