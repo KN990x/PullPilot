@@ -83,8 +83,10 @@ Two pnpm settings in `web/pnpm-workspace.yaml` are deliberate and worth knowing 
   after checking why it needs one.
 - `minimumReleaseAge: 10080` — a new resolution will not pick a version published less
   than 7 days ago, which is the window in which malicious publishes are usually caught.
-  It matches the `cooldown` in `.github/dependabot.yml` and does not affect
-  `--frozen-lockfile`, so CI and Docker stay deterministic. If an install fails with
+  It matches the `cooldown` in `.github/dependabot.yml`. pnpm 11 enforces it on an
+  existing lockfile too, `--frozen-lockfile` included: an entry younger than 7 days fails
+  the install in CI and in the Docker build with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`,
+  so a security update to a fresh release waits until it has aged in. If an install fails with
   `ERR_PNPM_NO_MATURE_MATCHING_VERSION`, lower the range in `package.json` to the newest
   version that has aged in — do not add an exclusion just to get the newest release.
 
