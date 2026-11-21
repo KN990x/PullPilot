@@ -41,7 +41,7 @@ jobs:
       contents: write # release assets (only the assets job gets it)
       packages: write # push to GHCR
       actions: read # check the released commit passed CI
-    uses: KN990x/.github/.github/workflows/ghcr-publish.yml@c859a5362f488cdc045747c8f44a03ad91aa6bd9 # v1.2.2
+    uses: KN990x/.github/.github/workflows/ghcr-publish.yml@b68c77e9ce54507686108a96dccbad8c80210ec6 # v1.2.3
     with:
       image: ghcr.io/kn990x/pullpilot
       tag: ${{ github.event.release.tag_name || inputs.tag }}
