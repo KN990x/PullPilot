@@ -6,20 +6,17 @@ You can open issues for bugs or ideas, and pull requests for fixes or features.
 
 ## Requirements
 
-- **[mise](https://mise.jdx.dev)** or **[pyenv](https://github.com/pyenv/pyenv)** to get the
-  Python version pinned in `.python-version` (3.11.15 — the same line as the published
-  `python:3.11-slim` image). mise also installs the Node version in `.nvmrc`.
+- **[pyenv](https://github.com/pyenv/pyenv)** to get the Python version pinned in
+  `.python-version` (3.11.15 — the same line as the published `python:3.11-slim` image).
+  Any Python 3.11+ works, but pyenv is what CI parity assumes.
 - **Node.js** 26 or newer (the line in `.nvmrc`), and **pnpm** for the frontend in `web/`. Do not use npm or
   Yarn: the lockfile is `web/pnpm-lock.yaml`.
 - **Docker** and **Docker Compose** (optional but useful to validate the production image or real compose workflows).
 
 ## Development setup
 
-The quickest path is `mise install` followed by `make setup`, which checks the toolchain,
-creates `.venv` with the backend, installs `web/` from the frozen lockfile and copies
-`.env.example` to `.env` if it does not exist yet. It is idempotent; the README section
-"Set up the project on another machine" has the details. The steps are described below if
-you prefer to run them yourself (`make setup-web` alone reinstalls the frontend).
+The quickest path is `make setup` (backend) and `make setup-web` (frontend). Both are
+described below if you prefer to run the steps yourself.
 
 ### Backend
 

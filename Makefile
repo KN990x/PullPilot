@@ -1,8 +1,8 @@
 SHELL := /bin/sh
 IMAGE_NAME ?= ghcr.io/kn990x/pullpilot
 
-# Uses the repo venv when it exists, otherwise `python` from PATH, which mise or pyenv
-# already resolve to the pinned version. Without either: PY=python3.11 make test
+# Uses the repo venv when it exists, otherwise `python` from PATH, which pyenv already
+# resolves to the pinned version. Without either: PY=python3.11 make test
 PY ?= $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python)
 
 # `corepack pnpm` resolves the version pinned by `packageManager` in web/package.json.
@@ -10,10 +10,12 @@ PNPM ?= corepack pnpm
 
 .PHONY: dev dev-server dev-web setup setup-web build up lint test check
 
-# Everything a fresh clone needs: toolchain check, .venv, web/ dependencies and the local
-# files from *.example. Idempotent; see scripts/setup.sh.
 setup:
-	@sh scripts/setup.sh
+	pyenv install -s "$$(cat .python-version)"
+	pyenv exec python -m venv .venv
+	.venv/bin/python -m pip install --upgrade pip
+	.venv/bin/python -m pip install -e ".[dev]"
+	@echo "Done. Activate it with: source .venv/bin/activate"
 
 setup-web:
 	cd web && $(PNPM) install --frozen-lockfile
