@@ -30,11 +30,10 @@ jobs:
         with:
           persist-credentials: false
 
-      # The one file whose breakage is silent: an invalid dependabot.yml disables
-      # Dependabot entirely, with no error anywhere. The check is shared by every KN990x
+      # A workflow that does not parse never runs at all. The check is shared by every KN990x
       # repository (KN990x/.github), pinned like any other action.
-      - name: Validate workflows and Dependabot config
-        uses: KN990x/.github/actions/validate-config@b68c77e9ce54507686108a96dccbad8c80210ec6 # v1.2.3
+      - name: Validate workflows
+        uses: KN990x/.github/actions/validate-config@eea440e7037fc081258f216703fd34cd85cb240a # v2.0.0
 
       # 3.11 only: what .python-version pins and what the image ships.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
