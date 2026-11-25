@@ -88,13 +88,24 @@ Open **http://your-server-ip:8000**. That is the whole installation.
 
 ## Local development (contributors)
 
+### Set up the project on another machine
+
+You need [mise](https://mise.jdx.dev) (or pyenv and Node 26), `make` and `git`.
+
 ```bash
 git clone https://github.com/KN990x/PullPilot
 cd PullPilot
-docker compose -f docker-compose-build.yml up -d --build
+mise install     # Python from .python-version, Node from .nvmrc
+make setup       # checks the toolchain, creates .venv, installs web/, copies .env.example
+make dev         # backend on :8000, Vite on :5173
 ```
 
-Day-to-day: `make dev` runs the backend and the Vite dev server together (see [`Makefile`](./Makefile)).
+- If `mise install` installs nothing, enable those files once: `mise settings add idiomatic_version_file_enable_tools python`, and the same for `node`.
+- Node 25+ no longer ships corepack, which pins pnpm to `packageManager` in `web/package.json`. If `make setup` says it is missing: `npm install -g corepack`, once.
+- `make setup` is idempotent: run it again after pulling or after fixing what it reported. It copies each `*.example` only if the local file does not exist yet and lists by name any key left empty. Every variable in `.env.example` is optional, so there is nothing to fill in for development.
+- Open http://localhost:5173 and create the admin user in the setup wizard. The local database lives in `.devdata`; delete it to start over.
+
+Day-to-day: `make dev` runs the backend and the Vite dev server together, and `make check` (lint and both test suites) runs before each commit (see [`Makefile`](./Makefile) and [`CONTRIBUTING.md`](./CONTRIBUTING.md)). To try the production image built from your checkout: `docker compose -f docker-compose-build.yml up -d --build`.
 
 ## Important notes
 
@@ -192,13 +203,24 @@ Abre **http://tu-servidor-ip:8000**. Eso es toda la instalación.
 
 ## Desarrollo local (contribuidores)
 
+### Montar el proyecto en otra máquina
+
+Necesitas [mise](https://mise.jdx.dev) (o pyenv y Node 26), `make` y `git`.
+
 ```bash
 git clone https://github.com/KN990x/PullPilot
 cd PullPilot
-docker compose -f docker-compose-build.yml up -d --build
+mise install     # Python de .python-version, Node de .nvmrc
+make setup       # comprueba las herramientas, crea .venv, instala web/, copia .env.example
+make dev         # backend en :8000, Vite en :5173
 ```
 
-Día a día: `make dev` levanta el backend y el servidor de Vite a la vez (véase [`Makefile`](./Makefile)).
+- Si `mise install` no instala nada, activa esos ficheros una vez: `mise settings add idiomatic_version_file_enable_tools python`, y lo mismo para `node`.
+- Node 25+ ya no trae corepack, que fija pnpm al `packageManager` de `web/package.json`. Si `make setup` dice que falta: `npm install -g corepack`, una vez.
+- `make setup` es idempotente: vuelve a lanzarlo tras un `pull` o tras arreglar lo que te haya indicado. Copia cada `*.example` solo si el fichero local aún no existe y lista por nombre las claves que queden vacías. Todas las variables de `.env.example` son opcionales, así que para desarrollar no hay nada que rellenar.
+- Abre http://localhost:5173 y crea el usuario administrador en el asistente. La base de datos local vive en `.devdata`; bórrala para empezar de cero.
+
+Día a día: `make dev` levanta el backend y el servidor de Vite a la vez, y `make check` (lint y las dos suites de tests) se pasa antes de cada commit (véase [`Makefile`](./Makefile) y [`CONTRIBUTING.md`](./CONTRIBUTING.md)). Para probar la imagen de producción construida desde tu copia: `docker compose -f docker-compose-build.yml up -d --build`.
 
 ## Notas importantes
 
