@@ -22,3 +22,9 @@ preferFrozenLockfile: true
 
 # Peer dependency warnings should not break the install.
 strictPeerDependencies: false
+
+# Security overrides. workbox-build 7.4.1 pins glob ^11, which drags minimatch 10
+# (GHSA-g3hv-75wg-m249). glob 14 moves to minimatch 11 and keeps the globSync API that
+# workbox-build uses. Drop this once workbox-build depends on glob 14 itself.
+overrides:
+  workbox-build>glob: ^14.0.6
