@@ -11,7 +11,7 @@ dependencies = [
   "fastapi==0.162.0",
   # Pinned on its own because server/app.py imports starlette.middleware.sessions
   # directly. FastAPI declares its own compatible range, so bump the two together —
-  # two independent Dependabot PRs can otherwise land an unresolvable pair.
+  # bumping only one of them can otherwise land an unresolvable pair.
   "starlette==1.10.0",
   "uvicorn==0.54.0",
   "pydantic==2.14.1",
@@ -30,8 +30,7 @@ dev = [
   # turns an unrelated commit red — and does not reproduce in an older local venv.
   "ruff==0.17.2",
   # AGENTS.md tells you to run `.venv/bin/pip-audit` before calling a dependency change
-  # good, but it was never installed by `make setup`: only security-audit.yml pip-installed
-  # it, on the runner. Pinned for the same reason as ruff.
+  # good, so `make setup` installs it. Pinned for the same reason as ruff.
   "pip-audit==2.10.1",
 ]
 

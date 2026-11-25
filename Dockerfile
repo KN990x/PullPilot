@@ -1,6 +1,6 @@
 # Base images are pinned by digest as well as tag. The tag says which line (Node 26,
 # Python 3.11); the digest says which build of it, so one commit always builds from the
-# same bytes, and base-image patches arrive as the monthly Dependabot `docker` PR
+# same bytes, and base-image patches arrive as a deliberate digest bump in a commit
 # instead of silently on the next build.
 FROM --platform=$BUILDPLATFORM node:26-alpine@sha256:40cd011b55415bc894e45b02fdd5a5dfde056921b7d23a64c74f80497af48797 AS frontend-builder
 
@@ -35,9 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Docker CLI and Compose plugin from the official image, not apt's `docker.io`: that
 # package drags in the whole engine (dockerd, containerd), which never runs here.
 #
-# Caveat worth knowing: Dependabot's Docker updater parses `FROM` directives, and this is
-# a `COPY --from`. Do not assume the pin below is being watched — check it by hand when
-# reviewing the ignore rule for `docker` in .github/dependabot.yml.
+# Caveat worth knowing: this pin is a `COPY --from`, not a `FROM`, so tools that only parse
+# `FROM` directives do not see it. Check it by hand when bumping the base images.
 COPY --from=docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker:28-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d /usr/local/libexec/docker/cli-plugins/docker-compose \
      /usr/local/libexec/docker/cli-plugins/docker-compose

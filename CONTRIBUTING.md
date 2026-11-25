@@ -33,7 +33,8 @@ pyenv reads `.python-version` automatically inside the repository, so `python` r
 the pinned interpreter once the shim is on your `PATH`.
 
 The project has no Python lockfile: the exact versions of the direct dependencies are pinned
-with `==` in `pyproject.toml`, and CI audits the fully resolved tree with `pip-audit`.
+with `==` in `pyproject.toml`, and every dependency update audits the fully resolved tree
+with `pip-audit`.
 Install with `pip`; do not add a `uv.lock` unless the Docker build is migrated to `uv` as well.
 
 Environment variables (all optional):
@@ -83,7 +84,7 @@ Two pnpm settings in `web/pnpm-workspace.yaml` are deliberate and worth knowing 
   after checking why it needs one.
 - `minimumReleaseAge: 10080` — a new resolution will not pick a version published less
   than 7 days ago, which is the window in which malicious publishes are usually caught.
-  It matches the `cooldown` in `.github/dependabot.yml`. pnpm 11 enforces it on an
+  pnpm 11 enforces it on an
   existing lockfile too, `--frozen-lockfile` included: an entry younger than 7 days fails
   the install in CI and in the Docker build with `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`,
   so a security update to a fresh release waits until it has aged in. If an install fails with

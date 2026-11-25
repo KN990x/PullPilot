@@ -83,11 +83,9 @@ wrongly, and each one is now either automatic or a fixed value.
 
 ## Automated security tooling
 
-This repository runs Dependabot alerts and grouped security updates, secret scanning with
-push protection, `pip-audit` for Python, and `pnpm audit` for the frontend. The audits run
-monthly (and on demand) from [`security-audit.yml`](.github/workflows/security-audit.yml):
-they are an alarm, not a merge gate, so they no longer decorate every pull request with a
-check nobody can clear. The merge gate is [`ci.yml`](.github/workflows/ci.yml), which runs
+This repository runs Dependabot security alerts and secret scanning with push protection.
+`pip-audit` (Python) and `pnpm audit` (frontend) run with every dependency update, which is
+done by hand with the full check rather than in Actions. The merge gate is [`ci.yml`](.github/workflows/ci.yml), which runs
 lint, tests, the frontend build and a cold-start smoke test of the image.
 
 The frontend additionally relies on two pnpm guarantees, configured in
